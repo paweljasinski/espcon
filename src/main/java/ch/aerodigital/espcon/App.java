@@ -1,3 +1,5 @@
+
+
 package ch.aerodigital.espcon;
 
 import java.io.IOException;
@@ -26,7 +28,7 @@ import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 
 /**
- * Hello world!
+ *
  *
  */
 public class App {
@@ -114,7 +116,7 @@ public class App {
                     processCommand(line);
                 } else {
                     if (null != serialPort) {
-                        serialPort.writeString(line + "\r");
+                        serialPort.writeString(line + "\r\n");
                     }
                 }
                 prompt = waitForPrompt();
@@ -133,20 +135,23 @@ public class App {
         }
     }
 
-    volatile static String lastPrompt;
-    static int promptCount = 0;
-
     private class PortReader implements SerialPortEventListener {
+
+        private StringBuilder lineBuffer = new StringBuilder(1024);
 
         public void serialEvent(SerialPortEvent event) {
 
             if (event.isRXCHAR() && event.getEventValue() > 0) {
                 try {
                     String data = serialPort.readString(event.getEventValue());
-                    //dump("d", data);
-                    String[] lines = data.split("\r\n");
-                    for (String line : lines) {
-                        //dump("l", line);
+                    lineBuffer.append(data);
+                    dump("d ", data);
+                    dump("lb", lineBuffer.toString());
+                    String[] lines = lineBuffer.toString().split("\r\n", -1);
+                    String line;
+                    for (int idx = 0; idx < lines.length-1; idx++) {
+                        line = lines[idx];
+                        dump("l"+idx, line);
                         if (line.startsWith("> ") || line.startsWith(">> ")) {
                             if (!waitForMarker) {
                                 try {
@@ -155,18 +160,37 @@ public class App {
                                 } catch (InterruptedException ex) {
                                     System.out.println("interrupter in put");
                                 }
-                            } else {
-                                lastPrompt = line;
                             }
-
                         } else {
-                            if (line.contains("END~~~")) {
+                            if (line.equals("~~~END~~~")) {
                                 waitForMarker = false;
                             } else {
                                 System.out.println(line);
                             }
                         }
                     }
+                    // deal with the last one
+                    line = lines[lines.length-1];
+                    dump("ll", line);
+                    if (line.length() == 0) {
+                        lineBuffer.setLength(0);
+                    } else {
+                        if (line.startsWith("> ") || line.startsWith(">> ")) {
+                            if (!waitForMarker) {
+                                try {
+                                    promptQueue.put(line);
+                                } catch (InterruptedException ex) {
+                                    System.out.println("interrupter in put");
+                                }
+                            }
+                            lineBuffer.setLength(0);
+                        } else {
+                            lineBuffer.setLength(0);
+                            // System.out.println("appending: " + line);
+                            lineBuffer.append(line); // keep the rest which is not prompt
+                        }
+                    }
+
                 } catch (SerialPortException ex) {
                     System.out.println(ex.toString());
                 }
@@ -226,8 +250,12 @@ public class App {
                 System.out.println("exception in ls: " + ex);
             }
         } else if (command.startsWith("--cat")) {
-
-            ViewFile("main.lua");
+            String parts[] = command.split(" ");
+            if (parts.length == 2) {
+                ViewFile(parts[1]);
+            } else {
+                System.out.println("expect exactly one parameter to --cat");
+            }
         }
 
         /*
@@ -249,7 +277,7 @@ public class App {
                 +     "_f=file.open(\"" + fn + "\",\"r\") \n"
                 +         "repeat _line = _f:readline() \n"
                 +         "    if (_line ~= nil) then \n"
-                +         "         print(_line) \n"
+                +         "         print(_line:sub(1,-2)) \n"
                 +         "    end \n"
                 +         "until _line == nil \n"
                 + "    _f:close() \n"
@@ -319,6 +347,7 @@ public class App {
     }
 
     private void dump(String p, String s) {
+        return;
         System.out.print(p + " ");
         for (int i = 0; i < s.length(); i++) {
             System.out.print(String.format("%02X ", (int) s.charAt(i)));
