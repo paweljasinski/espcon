@@ -1,5 +1,3 @@
-
-
 package ch.aerodigital.espcon;
 
 import java.io.IOException;
@@ -38,7 +36,9 @@ public class App {
     public static boolean portOpen = false;
     public static SerialPort serialPort;
     public static Terminal terminal;
-    public static volatile boolean waitForMarker;
+    public static boolean waitForMarker;
+
+    private static final String MARKER = "~~~END~~~";
 
     public static void main(String[] args) {
 
@@ -91,7 +91,6 @@ public class App {
             App app = new App();
             app.run();
         } catch (IOException ex) {
-            // what can happen here
             System.out.println(ex);
         }
     }
@@ -99,21 +98,24 @@ public class App {
     public void run() throws IOException {
         openPort();
 
-        terminal = TerminalBuilder.builder()
-                .system(true)
-                .build();
+        terminal = TerminalBuilder.builder().system(true).build();
 
         History history;
         history = new DefaultHistory();
         LineReader reader = LineReaderBuilder.builder().terminal(terminal).history(history).build();
         reader.setVariable(LineReader.HISTORY_FILE, ".cmd-history");
-        String prompt = "";
+        String prompt = "press ENTER to sync";
         while (true) {
             String line;
             try {
                 line = reader.readLine(prompt);
                 if (line.startsWith("--")) { // abuse lua comment as internal command prefix
-                    processCommand(line);
+                    try {
+                        processCommand(line);
+                    } catch (InvalidCommandException ex) {
+                        System.out.println(ex.getMessage());
+                        continue; // reuse prompt
+                    }
                 } else {
                     if (null != serialPort) {
                         serialPort.writeString(line + "\r\n");
@@ -137,7 +139,7 @@ public class App {
 
     private class PortReader implements SerialPortEventListener {
 
-        private StringBuilder lineBuffer = new StringBuilder(1024);
+        private final StringBuilder lineBuffer = new StringBuilder(1024);
 
         public void serialEvent(SerialPortEvent event) {
 
@@ -149,20 +151,11 @@ public class App {
                     dump("lb", lineBuffer.toString());
                     String[] lines = lineBuffer.toString().split("\r\n", -1);
                     String line;
-                    for (int idx = 0; idx < lines.length-1; idx++) {
+                    for (int idx = 0; idx < lines.length - 1; idx++) {
                         line = lines[idx];
-                        dump("l"+idx, line);
-                        if (line.startsWith("> ") || line.startsWith(">> ")) {
-                            if (!waitForMarker) {
-                                try {
-                                    // System.out.println("prompt out " + line + promptCount);
-                                    promptQueue.put(line);
-                                } catch (InterruptedException ex) {
-                                    System.out.println("interrupter in put");
-                                }
-                            }
-                        } else {
-                            if (line.equals("~~~END~~~")) {
+                        dump("l" + idx, line);
+                        if (!line.equals("> ") && !line.equals(">> ")) {
+                            if (line.equals(MARKER)) {
                                 waitForMarker = false;
                             } else {
                                 System.out.println(line);
@@ -170,24 +163,27 @@ public class App {
                         }
                     }
                     // deal with the last one
-                    line = lines[lines.length-1];
+                    line = lines[lines.length - 1];
                     dump("ll", line);
                     if (line.length() == 0) {
                         lineBuffer.setLength(0);
-                    } else {
-                        if (line.startsWith("> ") || line.startsWith(">> ")) {
-                            if (!waitForMarker) {
-                                try {
-                                    promptQueue.put(line);
-                                } catch (InterruptedException ex) {
-                                    System.out.println("interrupter in put");
-                                }
+                        return;
+                    }
+                    // from here, only not empty last line
+                    if (line.startsWith("> ") || line.startsWith(">> ")) {
+                        if (!waitForMarker) {
+                            try {
+                                promptQueue.put(line);
+                            } catch (InterruptedException ex) {
+                                System.out.println("interrupter in put");
                             }
+                        }
+                        lineBuffer.setLength(0);
+                    } else {
+                        if (lines.length > 1) {
+                            // shift the remainder
                             lineBuffer.setLength(0);
-                        } else {
-                            lineBuffer.setLength(0);
-                            // System.out.println("appending: " + line);
-                            lineBuffer.append(line); // keep the rest which is not prompt
+                            lineBuffer.append(line);
                         }
                     }
 
@@ -204,7 +200,7 @@ public class App {
         }
     }
 
-    private BlockingQueue promptQueue = new ArrayBlockingQueue(10);
+    private final BlockingQueue promptQueue = new ArrayBlockingQueue(10);
 
     private String waitForPrompt() {
         try {
@@ -215,11 +211,30 @@ public class App {
         return "? ";
     }
 
-    private void processCommand(String command) {
+    private class InvalidCommandException extends Exception {
 
-        if (command.equals("--echo off")) {
+        public InvalidCommandException(String message) {
+            super(message);
+        }
+    }
+
+    private void processCommand(String command) throws InvalidCommandException {
+
+        if (command.startsWith("--echo")) {
+            String args[] = command.split("\\s+");
+            int val = 0;
+            if (args.length != 2) {
+                throw new InvalidCommandException("expecting exactly one argument");
+            }
+            if (args[1].equals("off")) {
+                val = 0;
+            } else if (args[1].equals("on")) {
+                val = 1;
+            } else {
+                throw new InvalidCommandException("argument of --echo can be either on or off");
+            }
             try {
-                serialPort.writeString("uart.setup(0," + Integer.toString(baud) + ",8, 0, 1, 0)");
+                serialPort.writeString("uart.setup(0," + baud + ",8, 0, 1, " + val + ")\n");
             } catch (SerialPortException ex) {
                 System.out.println("exception in echo off: " + ex);
             }
@@ -234,15 +249,15 @@ public class App {
             try {
                 String cmd = ""
                         + "_dir=function()\n"
-                        + "local k,v,l\n"
-                        + "for k,v in pairs(file.list()) do\n"
-                        + "l = string.format(\"%-20s\",k)\n"
-                        + "print(l..\" : \"..v) \n"
-                        + "end \n"
+                        + "  local k,v,l\n"
+                        + "  for k,v in pairs(file.list()) do\n"
+                        + "    l=string.format(\"%-20s\",k)\n"
+                        + "    print(l..\" : \"..v)\n"
+                        + "  end\n"
                         + "end\n"
                         + "_dir()\n"
                         + "_dir=nil\n"
-                        + "print(\"~~~END~~~\")\n";
+                        + "print(\"" + MARKER + "\")\n";
                 waitForMarker = true;
                 serialPort.writeString(cmd);
 
@@ -250,48 +265,37 @@ public class App {
                 System.out.println("exception in ls: " + ex);
             }
         } else if (command.startsWith("--cat")) {
-            String parts[] = command.split(" ");
-            if (parts.length == 2) {
-                ViewFile(parts[1]);
-            } else {
-                System.out.println("expect exactly one parameter to --cat");
+            String args[] = command.split("\\s+");
+            if (args.length != 2) {
+                throw new InvalidCommandException("expect exactly one parameter to --cat");
             }
+            ViewFile(args[1]);
+        } else {
+            throw new InvalidCommandException("not a valid command");
         }
-
-        /*
-            String fileNames[] = command.split("[ \t]");
-            for (int i = 1; i < fileNames.length; i++) {
-                String name = fileNames[i];
-                System.out.println(name);
-                ViewFile(name);
-
-            }
-        }
-*/
     }
 
-    private void ViewFile(String fn) {
+    private void ViewFile(String filename) {
         String cmd = ""
                 + "_view=function()\n"
-                +     "local _line, _f\n"
-                +     "_f=file.open(\"" + fn + "\",\"r\") \n"
-                +         "repeat _line = _f:readline() \n"
-                +         "    if (_line ~= nil) then \n"
-                +         "         print(_line:sub(1,-2)) \n"
-                +         "    end \n"
-                +         "until _line == nil \n"
-                + "    _f:close() \n"
+                + "  local _line, _f\n"
+                + "  _f=file.open(\"" + filename + "\",\"r\")\n"
+                + "  repeat _line = _f:readline()\n"
+                + "    if (_line ~= nil) then\n"
+                + "      print(_line:sub(1,-2))\n"
+                + "    end\n"
+                + "  until _line == nil\n"
+                + "  _f:close()\n"
                 + "end\n"
                 + "_view()\n"
                 + "_view=nil\n"
-                + "print(\"~~~END~~~\")\n";
+                + "print(\"" + MARKER + "\")\n";
         waitForMarker = true;
         try {
             serialPort.writeString(cmd);
         } catch (SerialPortException ex) {
             System.out.println("exception in cat: " + ex);
         }
-
 
     }
 
