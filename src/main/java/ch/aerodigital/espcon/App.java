@@ -42,6 +42,7 @@ public class App {
     public static boolean waitForMarker;
 
     private final InteractiveSerialPortSink portReader;
+    private final CommonSerialPortEventSink commonSerialEventSink;
 
     private static final String MARKER = "~~~END~~~";
 
@@ -105,7 +106,8 @@ public class App {
     }
 
     public App() {
-        this.portReader = new InteractiveSerialPortSink();
+        commonSerialEventSink = new CommonSerialPortEventSink();
+        portReader = new InteractiveSerialPortSink(commonSerialEventSink);
     }
 
     public void run() throws IOException {
@@ -160,65 +162,90 @@ public class App {
         }
     }
 
+    private class CommonSerialPortEventSink implements SerialPortEventListener {
+        public void serialEvent(SerialPortEvent event) {
+            if (event.isBREAK()) {
+                System.out.println("BREAK");
+            } else if (event.isCTS()) {
+                System.out.println("CTS:" + event.getEventValue());
+            } else if (event.isDSR()) {
+                System.out.println("DSR:" + event.getEventValue());
+            } else if (event.isERR()) {
+                System.out.println(String.format("ERR: 0x04X", event.getEventValue()));
+            } else if (event.isRING()) {
+                System.out.println("RING:" + event.getEventValue());
+            } else if (event.isRLSD()) {
+                System.out.println("RLSD:" + event.getEventValue());
+            } else if (event.isRXCHAR()) {
+                System.out.println("RXCHAR:" + event.getEventValue());
+            } else if (event.isRXFLAG()) {
+                System.out.println("RXFLAG:" + event.getEventValue());
+            } else if (event.isTXEMPTY()) {
+                System.out.println("TXEMPTY:" + event.getEventValue());
+            }
+        }
+    }
+
     private class InteractiveSerialPortSink implements SerialPortEventListener {
+
+        private SerialPortEventListener next;
+
+        public InteractiveSerialPortSink(SerialPortEventListener next) {
+            this.next = next;
+        }
 
         private final StringBuilder lineBuffer = new StringBuilder(1024);
 
         public void serialEvent(SerialPortEvent event) {
-
-            if (event.isRXCHAR() && event.getEventValue() > 0) {
-                try {
-                    String data = serialPort.readString(event.getEventValue());
-                    lineBuffer.append(data);
-                    dump("d ", data);
-                    dump("lb", lineBuffer.toString());
-                    String[] lines = lineBuffer.toString().split("\r\n", -1);
-                    String line;
-                    for (int idx = 0; idx < lines.length - 1; idx++) {
-                        line = lines[idx];
-                        dump("l" + idx, line);
-                        if (!line.equals("> ") && !line.equals(">> ")) {
-                            if (line.equals(MARKER)) {
-                                waitForMarker = false;
-                            } else {
-                                System.out.println(line);
-                            }
+            if (!event.isRXCHAR() || event.getEventValue() <= 0) {
+                next.serialEvent(event);
+                return;
+            }
+            try {
+                String data = serialPort.readString(event.getEventValue());
+                lineBuffer.append(data);
+                dump("d ", data);
+                dump("lb", lineBuffer.toString());
+                String[] lines = lineBuffer.toString().split("\r\n", -1);
+                String line;
+                for (int idx = 0; idx < lines.length - 1; idx++) {
+                    line = lines[idx];
+                    dump("l" + idx, line);
+                    if (!line.equals("> ") && !line.equals(">> ")) {
+                        if (line.equals(MARKER)) {
+                            waitForMarker = false;
+                        } else {
+                            System.out.println(line);
                         }
                     }
-                    // deal with the last one
-                    line = lines[lines.length - 1];
-                    dump("ll", line);
-                    if (line.length() == 0) {
-                        lineBuffer.setLength(0);
-                        return;
-                    }
-                    // from here, only not empty last line
-                    if (line.startsWith("> ") || line.startsWith(">> ")) {
-                        if (!waitForMarker) {
-                            try {
-                                promptQueue.put(line);
-                            } catch (InterruptedException ex) {
-                                System.out.println("interrupter in put");
-                            }
-                        }
-                        lineBuffer.setLength(0);
-                    } else {
-                        if (lines.length > 1) {
-                            // shift the remainder
-                            lineBuffer.setLength(0);
-                            lineBuffer.append(line);
-                        }
-                    }
-
-                } catch (SerialPortException ex) {
-                    System.out.println(ex.toString());
                 }
-            } else if (event.isCTS()) {
-                System.out.println("cts event");
-            } else if (event.isERR()) {
-                System.out.println("FileManager: Unknown serial port error received.");
-            } else {
-                System.out.println("wtf event" + event);
+                // deal with the last one
+                line = lines[lines.length - 1];
+                dump("ll", line);
+                if (line.length() == 0) {
+                    lineBuffer.setLength(0);
+                    return;
+                }
+                // from here, only not empty last line
+                if (line.startsWith("> ") || line.startsWith(">> ")) {
+                    if (!waitForMarker) {
+                        try {
+                            promptQueue.put(line);
+                        } catch (InterruptedException ex) {
+                            System.out.println("interrupter in put");
+                        }
+                    }
+                    lineBuffer.setLength(0);
+                } else {
+                    if (lines.length > 1) {
+                        // shift the remainder
+                        lineBuffer.setLength(0);
+                        lineBuffer.append(line);
+                    }
+                }
+
+            } catch (SerialPortException ex) {
+                System.out.println(ex.toString());
             }
         }
     }
@@ -285,6 +312,7 @@ public class App {
             CommandExecutor ce = CommandExecutorFactory.createExecutor(command);
             ce.setRestoreEventListener(portReader);
             ce.setPromptQueue(promptQueue);
+            ce.setNextSerialPortEventListener(commonSerialEventSink);
             ce.start();
         } else if (command.equals("--globals")) {
             try {
@@ -336,7 +364,10 @@ public class App {
         serialPort.openPort();
         serialPort.setParams(baud, SerialPort.DATABITS_8,
                 SerialPort.STOPBITS_1, SerialPort.PARITY_NONE, false, false);
-        serialPort.addEventListener(portReader, SerialPort.MASK_RXCHAR + SerialPort.MASK_CTS);
+        serialPort.setEventsMask(SerialPort.MASK_BREAK | SerialPort.MASK_CTS | SerialPort.MASK_DSR |
+                SerialPort.MASK_ERR | SerialPort.MASK_RING | SerialPort.MASK_RLSD | SerialPort.MASK_RXCHAR |
+                SerialPort.MASK_RXFLAG | SerialPort.MASK_TXEMPTY);
+        serialPort.addEventListener(portReader);
     }
 
     private void dump(String p, String s) {

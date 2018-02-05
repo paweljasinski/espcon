@@ -20,4 +20,6 @@ public interface CommandExecutor {
 
     public void setPromptQueue(BlockingQueue promptQueue);
 
+    public void setNextSerialPortEventListener(SerialPortEventListener nextSerialPortEventListener);
+
 }

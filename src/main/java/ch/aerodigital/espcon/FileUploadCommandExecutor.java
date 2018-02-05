@@ -13,7 +13,6 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.BlockingQueue;
-import jssc.SerialPort;
 import jssc.SerialPortEvent;
 import jssc.SerialPortEventListener;
 import jssc.SerialPortException;
@@ -26,20 +25,6 @@ public class FileUploadCommandExecutor implements CommandExecutor {
 
     private String src;
     private String target;
-
-    /**
-     * @param restoreEventListener the restoreEventListener to set
-     */
-    public void setRestoreEventListener(SerialPortEventListener restoreEventListener) {
-        this.restoreEventListener = restoreEventListener;
-    }
-
-    /**
-     * @param promptQueue the promptQueue to set
-     */
-    public void setPromptQueue(BlockingQueue promptQueue) {
-        this.promptQueue = promptQueue;
-    }
 
     private enum State {
         IDLE,
@@ -65,6 +50,7 @@ public class FileUploadCommandExecutor implements CommandExecutor {
 
     // required to mark completion and give back the prompt
     private SerialPortEventListener restoreEventListener;
+    private SerialPortEventListener nextSerialPortEventListener;
     private BlockingQueue promptQueue;
 
     public FileUploadCommandExecutor(String command) throws InvalidCommandException {
@@ -132,7 +118,7 @@ public class FileUploadCommandExecutor implements CommandExecutor {
             System.out.println("Uploader: Unable to deactivate serial event listener " + ex);
         }
         try {
-            serialPort.addEventListener(new SerialPortSink(), SerialPort.MASK_RXCHAR + SerialPort.MASK_CTS);
+            serialPort.addEventListener(new SerialPortSink(nextSerialPortEventListener));
         } catch (SerialPortException ex) {
             System.out.println("Uploader: Add EventListener Error. Canceled. " + ex);
             return;
@@ -179,83 +165,105 @@ public class FileUploadCommandExecutor implements CommandExecutor {
     private class SerialPortSink implements SerialPortEventListener {
 
         private String dataCollector;
+        private SerialPortEventListener next;
 
-        public SerialPortSink() {
+        public SerialPortSink(SerialPortEventListener next) {
             dataCollector = "";
+            this.next = next;
         }
 
         public void serialEvent(SerialPortEvent event) {
-            if (event.isRXCHAR() && event.getEventValue() > 0) {
-                try {
-                    dataCollector = dataCollector + serialPort.readString(event.getEventValue());
-                } catch (SerialPortException ex) {
-                    System.out.println("exception when receiving data:" + ex);
+            if (!event.isRXCHAR() || event.getEventValue() <= 0) {
+                if (next != null) {
+                    next.serialEvent(event);
                 }
-                switch (state) {
-                    case IDLE: {
-                        System.out.println("unexpected data when in idle: " + dataCollector);
-                        break;
-                    }
-                    case LUA_TRANSFER: {
-                        int promptPos = dataCollector.indexOf("> ");
-                        if (-1 != promptPos) {
-                            dataCollector = dataCollector.substring(promptPos + 3);
-                            sendNextPacket();
-                        }
-                        break;
-                    }
-                    case FILE_TRANSFER:
-                        int crcEndMarkerPos = dataCollector.indexOf("~~~CRC-END~~~");
-                        if (-1 != crcEndMarkerPos) {
-                            int start = dataCollector.indexOf("~~~CRC-START~~~");
-                            String crcString = dataCollector.substring(start + 15, crcEndMarkerPos);
-                            dataCollector = dataCollector.substring(crcEndMarkerPos + 13);
-                            int receivedCrc = Integer.parseInt(crcString);
-                            int expectedCrc = Util.CRC(currentChunk);
-                            System.out.print(expectedCrc == receivedCrc ? "." : "e");
-                            sendNextPacket();
-                        }
-                        break;
-                    case END:
-                        int endPos = dataCollector.indexOf("~~~END~~~");
-                        if (-1 != endPos) {
-                            dataCollector = dataCollector.substring(endPos + 9);
-                            try {
-                                serialPort.writeString("_up=nil\n");
-                            } catch (SerialPortException ex) {
-                                System.out.println("failed to send final command " + ex);
-                            }
-                            state = State.WAIT_FINAL_PROMPT;
-                        }
-                        break;
-                    case WAIT_FINAL_PROMPT: {
-                        int promptPos = dataCollector.indexOf("> ");
-                        if (-1 != promptPos) {
-                            try {
-                                System.out.println();
-                                promptQueue.put("> ");
-                            } catch (InterruptedException ex) {
-                                System.out.println("intrerrupted when giving prompt " + ex);
-                            }
-                            try {
-                                serialPort.removeEventListener();
-                                serialPort.addEventListener(restoreEventListener, SerialPort.MASK_RXCHAR + SerialPort.MASK_CTS);
-                            } catch (SerialPortException ex) {
-                                System.out.println("Unable to restore command line processor");
-                            }
-                        }
-                        break;
-                    }
-                    default:
-                        break;
+                return;
+            }
+
+            try {
+                dataCollector = dataCollector + serialPort.readString(event.getEventValue());
+            } catch (SerialPortException ex) {
+                System.out.println("exception when receiving data:" + ex);
+            }
+            switch (state) {
+                case IDLE: {
+                    System.out.println("unexpected data when in idle: " + dataCollector);
+                    break;
                 }
-            } else if (event.isCTS()) {
-                System.out.println("CTS event");
-            } else if (event.isERR()) {
-                System.out.println("FileManager: Unknown serial port error received.");
-            } else {
-                System.out.println("wtf event" + event);
+                case LUA_TRANSFER: {
+                    int promptPos = dataCollector.indexOf("> ");
+                    if (-1 != promptPos) {
+                        dataCollector = dataCollector.substring(promptPos + 3);
+                        sendNextPacket();
+                    }
+                    break;
+                }
+                case FILE_TRANSFER:
+                    int crcEndMarkerPos = dataCollector.indexOf("~~~CRC-END~~~");
+                    if (-1 != crcEndMarkerPos) {
+                        int start = dataCollector.indexOf("~~~CRC-START~~~");
+                        String crcString = dataCollector.substring(start + 15, crcEndMarkerPos);
+                        dataCollector = dataCollector.substring(crcEndMarkerPos + 13);
+                        int receivedCrc = Integer.parseInt(crcString);
+                        int expectedCrc = Util.CRC(currentChunk);
+                        System.out.print(expectedCrc == receivedCrc ? "." : "e");
+                        sendNextPacket();
+                    }
+                    break;
+                case END:
+                    int endPos = dataCollector.indexOf("~~~END~~~");
+                    if (-1 != endPos) {
+                        dataCollector = dataCollector.substring(endPos + 9);
+                        try {
+                            serialPort.writeString("_up=nil\n");
+                        } catch (SerialPortException ex) {
+                            System.out.println("failed to send final command " + ex);
+                        }
+                        state = State.WAIT_FINAL_PROMPT;
+                    }
+                    break;
+                case WAIT_FINAL_PROMPT: {
+                    int promptPos = dataCollector.indexOf("> ");
+                    if (-1 != promptPos) {
+                        try {
+                            System.out.println();
+                            promptQueue.put("> ");
+                        } catch (InterruptedException ex) {
+                            System.out.println("intrerrupted when giving prompt " + ex);
+                        }
+                        try {
+                            serialPort.removeEventListener();
+                            serialPort.addEventListener(restoreEventListener);
+                        } catch (SerialPortException ex) {
+                            System.out.println("Unable to restore command line processor");
+                        }
+                    }
+                    break;
+                }
+                default:
+                    break;
             }
         }
+    }
+
+    /**
+     * @param restoreEventListener the restoreEventListener to set
+     */
+    public void setRestoreEventListener(SerialPortEventListener restoreEventListener) {
+        this.restoreEventListener = restoreEventListener;
+    }
+
+    /**
+     * @param promptQueue the promptQueue to set
+     */
+    public void setPromptQueue(BlockingQueue promptQueue) {
+        this.promptQueue = promptQueue;
+    }
+
+    /**
+     * @param nextSerialPortEventListener the nextSerialPortEventListener to set
+     */
+    public void setNextSerialPortEventListener(SerialPortEventListener nextSerialPortEventListener) {
+        this.nextSerialPortEventListener = nextSerialPortEventListener;
     }
 }
