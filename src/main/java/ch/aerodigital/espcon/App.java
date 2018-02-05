@@ -229,6 +229,7 @@ public class App {
         public void serialEvent(SerialPortEvent event) {
             String data, crc_parsed;
             int crc_end_marker;
+            boolean rearm_timer = false;
             if (event.isRXCHAR() && event.getEventValue() > 0) {
                 try {
                     data = serialPort.readString(event.getEventValue());
@@ -237,7 +238,10 @@ public class App {
                     System.out.println("exception when receiving data:" + ex);
                 }
                 if (rx_data.contains("> ")) {
-                    rx_data = "";
+                    if (sendIndex <= sendBuf.size()) {
+                        rx_data = "";
+                        rearm_timer = true;
+                    }
                 }
                 crc_end_marker = rx_data.indexOf("~~~CRC-END~~~");
                 if (-1 != crc_end_marker) {
@@ -251,11 +255,13 @@ public class App {
                     } else {
                         System.out.print("E");
                     }
+                    rearm_timer = true;
                 }
                 if (rx_data.contains("~~~END~~~")) {
                     try {
                         System.out.println();
                         promptQueue.put("> ");
+                        timer.cancel();
                     } catch (InterruptedException ex) {
                         System.out.println("intrerrupted when giving prompt " + ex);
                     }
@@ -265,6 +271,11 @@ public class App {
                     } catch (SerialPortException ex) {
                         System.out.println("Unable to restore command line processor");
                     }
+                }
+                if (rearm_timer) {
+                    timer.cancel();
+                    timer = new Timer();
+                    timer.schedule(createUploadTimerTask(), 1);
                 }
             } else if (event.isCTS()) {
                 System.out.println("cts event");
@@ -387,13 +398,15 @@ public class App {
 
     private byte[] currentChunk;
 
+    private long totalPackets;
+
     private void uploadFile(String src, String target) {
 
         File srcFile = new File(src);
 
         long nFullPackets = srcFile.length() / FILE_UPLOAD_PACKET_SIZE;
         long lastPacketSize = srcFile.length() % FILE_UPLOAD_PACKET_SIZE;
-        final long totalPackets = nFullPackets + (lastPacketSize != 0 ? 1 : 0);
+        totalPackets = nFullPackets + (lastPacketSize != 0 ? 1 : 0);
         long regularPacketSize = totalPackets == 1 ? lastPacketSize : FILE_UPLOAD_PACKET_SIZE;
 
         String cmd = ""
@@ -441,7 +454,13 @@ public class App {
             System.out.println("unable to open src");
             return;
         }
-        TimerTask taskPerformer = new TimerTask() {
+        sendIndex = 0;
+        timer = new Timer();
+        timer.schedule(createUploadTimerTask(), 10);
+    }
+
+    private TimerTask createUploadTimerTask() {
+        return new TimerTask() {
             public void run() {
                 if (sendIndex < sendBuf.size()) {
                     try {
@@ -465,15 +484,14 @@ public class App {
                     }
 
                 } else {
-                    timer.cancel();
+                    //System.out.println("************* bug **************");
+                    // silently ignore ?
                 }
                 sendIndex++;
             }
         };
-        sendIndex = 0;
-        timer = new Timer();
-        timer.schedule(taskPerformer, 10, 300);
     }
+
 
     private ArrayList<String> cmdPrep(String cmd) {
         ArrayList<String> s256 = new ArrayList<String>();
