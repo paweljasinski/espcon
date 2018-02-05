@@ -1,7 +1,6 @@
 package ch.aerodigital.espcon;
 
 import java.io.IOException;
-import java.util.Timer;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -32,13 +31,15 @@ import org.jline.terminal.TerminalBuilder;
  */
 public class App {
 
-    public static String serialPortDevice = null;
-    public static Integer baud = 230400;
-    public static boolean portOpen = false;
+    private static String serialPortDevice = null;
+    private static Integer baud = 230400;
     public static SerialPort serialPort;
-    public static Terminal terminal;
+
+    private Terminal terminal;
+    private History history;
+    private LineReader reader;
+
     public static boolean waitForMarker;
-    public Timer timer;
 
     private final InteractiveSerialPortSink portReader;
 
@@ -58,7 +59,6 @@ public class App {
                 .longOpt("baud")
                 .hasArg()
                 .argName("BAUD")
-                .type(Integer.class)
                 .build());
         try {
             // parse the command line arguments
@@ -81,11 +81,16 @@ public class App {
                 }
                 System.exit(0);
             }
-            if (line.hasOption("block-size")) {
-                System.out.println(line.getOptionValue("block-size"));
-            }
             if (line.hasOption("port")) {
                 serialPortDevice = line.getOptionValue("port");
+            }
+            if (line.hasOption("baud")) {
+                String baudAsString = line.getOptionValue("baud");
+                try {
+                    baud = Integer.parseInt(baudAsString);
+                } catch (NumberFormatException ex) {
+                    System.out.println("Unable to interpret baud argument: " + baudAsString);
+                }
             }
         } catch (ParseException exp) {
             System.out.println("Unexpected exception:" + exp.getMessage());
@@ -104,12 +109,31 @@ public class App {
     }
 
     public void run() throws IOException {
-        openPort();
         terminal = TerminalBuilder.builder().system(true).build();
-        History history;
         history = new DefaultHistory();
-        LineReader reader = LineReaderBuilder.builder().terminal(terminal).history(history).build();
+        reader = LineReaderBuilder.builder().terminal(terminal).history(history).build();
         reader.setVariable(LineReader.HISTORY_FILE, ".cmd-history");
+
+        boolean terminate = false;
+        while (!terminate) {
+            try {
+                openPort();
+                terminate = repl();
+            } catch (SerialPortException ex) {
+                System.out.println(ex);
+                reader.readLine("press ENTER to try again ... ");
+            } catch (EndOfFileException ex) {
+                try {
+                    serialPort.closePort();
+                } catch (SerialPortException ex2) {
+                    System.out.println("troulbe closing serial port " + ex2);
+                }
+                break;
+            }
+        }
+    }
+
+    private boolean repl() {
         String prompt = "press ENTER to sync ... ";
         while (true) {
             String line;
@@ -131,17 +155,7 @@ public class App {
             } catch (SerialPortException ex) {
                 System.out.println("unable to send serial: " + ex);
             } catch (UserInterruptException e) {
-                // Ignore
-            } catch (EndOfFileException e) {
-                if (timer != null) {
-                    timer.cancel();
-                }
-                try {
-                    serialPort.closePort();
-                } catch (SerialPortException ex) {
-                    System.out.println("troulbe closing serial port " + ex);
-                }
-                return;
+                // can do someting good here
             }
         }
     }
@@ -241,12 +255,7 @@ public class App {
                 System.out.println("exception in echo off: " + ex);
             }
         } else if (command.equals("--quit")) {
-            try {
-                serialPort.closePort();
-            } catch (SerialPortException ex) {
-
-            }
-            System.exit(0);
+            throw new EndOfFileException("terminated by user");
         } else if (command.equals("--ls")) {
             try {
                 String cmd = ""
@@ -271,7 +280,7 @@ public class App {
             if (args.length != 2) {
                 throw new InvalidCommandException("expect exactly one parameter to --cat");
             }
-            ViewFile(args[1]);
+            viewFile(args[1]);
         } else if (command.startsWith("--upload")) {
             CommandExecutor ce = CommandExecutorFactory.createExecutor(command);
             ce.setRestoreEventListener(portReader);
@@ -290,7 +299,7 @@ public class App {
         }
     }
 
-    private void ViewFile(String filename) {
+    private void viewFile(String filename) {
         String cmd = ""
                 + "_view=function()\n"
                 + "  local _line, _f\n"
@@ -314,57 +323,29 @@ public class App {
 
     }
 
-    public boolean openPort() {
-        int nSpeed = baud;
-        if (portOpen) {
+    public void openPort() throws SerialPortException {
+        if (null != serialPort && serialPort.isOpened()) {
             try {
                 serialPort.closePort();
             } catch (SerialPortException ex) {
                 System.out.println("exception when closing serial port: " + ex);
             }
-        } else {
-            System.out.println("Try to open port " + serialPortDevice + ", baud " + Integer.toString(nSpeed) + ", 8N1");
         }
+        System.out.println("About to open port " + serialPortDevice + ", baud " + baud + ", 8N1");
         serialPort = new SerialPort(serialPortDevice);
-        portOpen = false;
-        try {
-            serialPort.openPort();
-            SetSerialPortParams();
-            serialPort.addEventListener(portReader, SerialPort.MASK_RXCHAR + SerialPort.MASK_CTS);
-        } catch (SerialPortException ex) {
-            System.out.println("failed to open port " + ex);
-        }
-        if (portOpen) {
-            System.out.println("Open port " + serialPortDevice + " - Success.");
-        }
-        return portOpen;
-    }
-
-    public boolean SetSerialPortParams() {
-        boolean success = false;
-        try {
-            success = serialPort.setParams(baud,
-                    SerialPort.DATABITS_8,
-                    SerialPort.STOPBITS_1,
-                    SerialPort.PARITY_NONE,
-                    false,
-                    false);
-        } catch (SerialPortException ex) {
-            System.out.println("unable to configure serial port " + ex);
-        }
-        if (!success) {
-            System.out.println("ERROR setting port " + serialPortDevice + " parameters.");
-        }
-        return success;
+        serialPort.openPort();
+        serialPort.setParams(baud, SerialPort.DATABITS_8,
+                SerialPort.STOPBITS_1, SerialPort.PARITY_NONE, false, false);
+        serialPort.addEventListener(portReader, SerialPort.MASK_RXCHAR + SerialPort.MASK_CTS);
     }
 
     private void dump(String p, String s) {
-        return;
-        System.out.print(p + " ");
-        for (int i = 0; i < s.length(); i++) {
-            System.out.print(String.format("%02X ", (int) s.charAt(i)));
+        if (false) {
+            System.out.print(p + " ");
+            for (int i = 0; i < s.length(); i++) {
+                System.out.print(String.format("%02X ", (int) s.charAt(i)));
+            }
+            System.out.println();
         }
-        System.out.println();
     }
-
 }
