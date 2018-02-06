@@ -165,7 +165,7 @@ public class FileUploadCommandExecutor implements CommandExecutor {
     private class SerialPortSink implements SerialPortEventListener {
 
         private String dataCollector;
-        private SerialPortEventListener next;
+        private final SerialPortEventListener next;
 
         public SerialPortSink(SerialPortEventListener next) {
             dataCollector = "";
@@ -185,19 +185,18 @@ public class FileUploadCommandExecutor implements CommandExecutor {
             } catch (SerialPortException ex) {
                 System.out.println("exception when receiving data:" + ex);
             }
+            int promptPos;
             switch (state) {
-                case IDLE: {
+                case IDLE:
                     System.out.println("unexpected data when in idle: " + dataCollector);
                     break;
-                }
-                case LUA_TRANSFER: {
-                    int promptPos = dataCollector.indexOf("> ");
+                case LUA_TRANSFER:
+                    promptPos = dataCollector.indexOf("> ");
                     if (-1 != promptPos) {
                         dataCollector = dataCollector.substring(promptPos + 3);
                         sendNextPacket();
                     }
                     break;
-                }
                 case FILE_TRANSFER:
                     int crcEndMarkerPos = dataCollector.indexOf("~~~CRC-END~~~");
                     if (-1 != crcEndMarkerPos) {
@@ -222,8 +221,8 @@ public class FileUploadCommandExecutor implements CommandExecutor {
                         state = State.WAIT_FINAL_PROMPT;
                     }
                     break;
-                case WAIT_FINAL_PROMPT: {
-                    int promptPos = dataCollector.indexOf("> ");
+                case WAIT_FINAL_PROMPT:
+                    promptPos = dataCollector.indexOf("> ");
                     if (-1 != promptPos) {
                         try {
                             System.out.println();
@@ -239,7 +238,6 @@ public class FileUploadCommandExecutor implements CommandExecutor {
                         }
                     }
                     break;
-                }
                 default:
                     break;
             }
