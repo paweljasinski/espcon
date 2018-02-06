@@ -39,12 +39,19 @@ public class App {
     private History history;
     private LineReader reader;
 
-    public static boolean waitForMarker;
-
     private final InteractiveSerialPortSink portReader;
     private final CommonSerialPortEventSink commonSerialEventSink;
 
     private static final String MARKER = "~~~END~~~";
+
+    public enum State {
+        DISCONNECTED,
+        SYNC,
+        REPL,
+        WAIT_FOR_MARKER
+    }
+
+    State state;
 
     public static void main(String[] args) {
 
@@ -108,6 +115,7 @@ public class App {
     public App() {
         commonSerialEventSink = new CommonSerialPortEventSink();
         portReader = new InteractiveSerialPortSink(commonSerialEventSink);
+        state = State.DISCONNECTED;
     }
 
     public void run() throws IOException {
@@ -120,6 +128,7 @@ public class App {
         while (!terminate) {
             try {
                 openPort();
+                state = State.REPL;
                 terminate = repl();
             } catch (SerialPortException ex) {
                 System.out.println(ex);
@@ -149,9 +158,7 @@ public class App {
                         continue; // reuse prompt
                     }
                 } else {
-                    if (null != serialPort) {
-                        serialPort.writeString(line + "\r\n");
-                    }
+                    serialPort.writeString(line + "\r\n");
                 }
                 prompt = waitForPrompt();
             } catch (SerialPortException ex) {
@@ -204,16 +211,18 @@ public class App {
             try {
                 String data = serialPort.readString(event.getEventValue());
                 lineBuffer.append(data);
-                dump("d ", data);
+                dump("dd ", data);
                 dump("lb", lineBuffer.toString());
                 String[] lines = lineBuffer.toString().split("\r\n", -1);
                 String line;
+                // process all but last line
                 for (int idx = 0; idx < lines.length - 1; idx++) {
                     line = lines[idx];
                     dump("l" + idx, line);
+                    // ignore all prompts followed by a new line
                     if (!line.equals("> ") && !line.equals(">> ")) {
                         if (line.equals(MARKER)) {
-                            waitForMarker = false;
+                            state = State.REPL;
                         } else {
                             System.out.println(line);
                         }
@@ -222,13 +231,14 @@ public class App {
                 // deal with the last one
                 line = lines[lines.length - 1];
                 dump("ll", line);
+                // input ends with new line
                 if (line.length() == 0) {
                     lineBuffer.setLength(0);
                     return;
                 }
-                // from here, only not empty last line
+                // from here, only not empty last line, not followed with newline
                 if (line.startsWith("> ") || line.startsWith(">> ")) {
-                    if (!waitForMarker) {
+                    if (state != State.WAIT_FOR_MARKER) {
                         try {
                             promptQueue.put(line);
                         } catch (InterruptedException ex) {
@@ -296,9 +306,8 @@ public class App {
                         + "_dir()\n"
                         + "_dir=nil\n"
                         + "print('~~~'..'END'..'~~~')\n";
-                waitForMarker = true;
+                state = State.WAIT_FOR_MARKER;
                 serialPort.writeString(cmd);
-
             } catch (SerialPortException ex) {
                 System.out.println("exception in ls: " + ex);
             }
@@ -309,10 +318,17 @@ public class App {
             }
             viewFile(args[1]);
         } else if (command.startsWith("--upload")) {
-            CommandExecutor ce = CommandExecutorFactory.createExecutor(command);
+            FileUploadCommandExecutor ce = new FileUploadCommandExecutor(command);
             ce.setRestoreEventListener(portReader);
             ce.setPromptQueue(promptQueue);
             ce.setNextSerialPortEventListener(commonSerialEventSink);
+            ce.start();
+        } else if (command.startsWith("--save")) {
+            TextFileUploadCommandExecutor ce = new TextFileUploadCommandExecutor(command);
+            ce.setRestoreEventListener(portReader);
+            ce.setPromptQueue(promptQueue);
+            ce.setNextSerialPortEventListener(commonSerialEventSink);
+            ce.setAutoRun(false);
             ce.start();
         } else if (command.equals("--globals")) {
             try {
@@ -342,7 +358,7 @@ public class App {
                 + "_view()\n"
                 + "_view=nil\n"
                 + "print('~~~'..'END'..'~~~')\n";
-        waitForMarker = true;
+        state = State.WAIT_FOR_MARKER;
         try {
             serialPort.writeString(cmd);
         } catch (SerialPortException ex) {
