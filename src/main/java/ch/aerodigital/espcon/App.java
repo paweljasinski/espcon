@@ -181,24 +181,16 @@ public class App {
         String prompt = "";
         while (state == State.SYNC) {
             String line;
-            try {
-                prompt = "press ENTER to sync ... ";
-                line = reader.readLine(prompt);
-                serialPort.writeString(line + "\n");
-            } catch (SerialPortException ex) {
-                System.out.println("serial exception in sync:" + ex);
-            }
+            prompt = "press ENTER to sync ... ";
+            line = reader.readLine(prompt);
+            serialPort.writeStringX(line + "\n");
             prompt = timedDrain(100);
             if (prompt == null) {
                 continue;
             }
             if (prompt.equals(">> ")) {
-                try {
-                    System.out.println("aborting >> prompt");
-                    serialPort.writeString("x\n");
-                } catch (SerialPortException ex) {
-                    System.out.println("serial exception in sync:" + ex);
-                }
+                System.out.println("aborting >> prompt");
+                serialPort.writeStringX("x\n");
                 prompt = timedDrain(200);
                 if (prompt.equals("> ")) {
                     state = State.REPL;
@@ -209,12 +201,8 @@ public class App {
         }
 
         // turn echo off
-        try {
-            serialPort.writeString("uart.setup(0," + baud + ",8, 0, 1, " + echo + ")\n");
-            prompt = timedDrain(25);
-        } catch (SerialPortException ex) {
-            System.out.println("serial exception in sync:" + ex);
-        }
+        serialPort.writeStringX("uart.setup(0," + baud + ",8, 0, 1, " + echo + ")\n");
+        prompt = timedDrain(25);
 
         while (true) {
             String line;
@@ -228,13 +216,14 @@ public class App {
                         continue; // reuse prompt
                     }
                 } else {
-                    serialPort.writeString(line + "\r\n");
+                    serialPort.writeStringX(line + "\r\n");
                 }
                 prompt = waitForPrompt(2000, 25);
-            } catch (SerialPortException ex) {
-                System.out.println("unable to send serial: " + ex);
             } catch (UserInterruptException e) {
                 // can do someting good here
+            } catch (SerialPortXException ex) {
+                System.out.println("serial exception: " + ex);
+                // probably this should either terminate or go into device reopen loop
             }
         }
     }
@@ -279,54 +268,49 @@ public class App {
                 next.serialEvent(event);
                 return;
             }
-            try {
-                String data = serialPort.readString(event.getEventValue());
-                lineBuffer.append(data);
-                dump("dd ", data);
-                dump("lb", lineBuffer.toString());
-                String[] lines = lineBuffer.toString().split("\r\n", -1);
-                String line;
-                // process all but last line
-                for (int idx = 0; idx < lines.length - 1; idx++) {
-                    line = lines[idx];
-                    dump("l" + idx, line);
-                    // ignore all prompts followed by a new line
-                    if (!line.equals("> ") && !line.equals(">> ")) {
-                        if (line.equals(MARKER)) {
-                            state = State.REPL;
-                        } else {
-                            System.out.println(line);
-                        }
+            String data = serialPort.readStringX(event.getEventValue());
+            lineBuffer.append(data);
+            dump("dd ", data);
+            dump("lb", lineBuffer.toString());
+            String[] lines = lineBuffer.toString().split("\r\n", -1);
+            String line;
+            // process all but last line
+            for (int idx = 0; idx < lines.length - 1; idx++) {
+                line = lines[idx];
+                dump("l" + idx, line);
+                // ignore all prompts followed by a new line
+                if (!line.equals("> ") && !line.equals(">> ")) {
+                    if (line.equals(MARKER)) {
+                        state = State.REPL;
+                    } else {
+                        System.out.println(line);
                     }
                 }
-                // deal with the last one
-                line = lines[lines.length - 1];
-                dump("ll", line);
-                // input ends with new line
-                if (line.length() == 0) {
+            }
+            // deal with the last one
+            line = lines[lines.length - 1];
+            dump("ll", line);
+            // input ends with new line
+            if (line.length() == 0) {
+                lineBuffer.setLength(0);
+                return;
+            }
+            // from here, only not empty last line, not followed with newline
+            if (line.startsWith("> ") || line.startsWith(">> ")) {
+                if (state != State.WAIT_FOR_MARKER) {
+                    try {
+                        promptQueue.put(line);
+                    } catch (InterruptedException ex) {
+                        System.out.println("interrupter in put");
+                    }
+                }
+                lineBuffer.setLength(0);
+            } else {
+                if (lines.length > 1) {
+                    // shift the remainder
                     lineBuffer.setLength(0);
-                    return;
+                    lineBuffer.append(line);
                 }
-                // from here, only not empty last line, not followed with newline
-                if (line.startsWith("> ") || line.startsWith(">> ")) {
-                    if (state != State.WAIT_FOR_MARKER) {
-                        try {
-                            promptQueue.put(line);
-                        } catch (InterruptedException ex) {
-                            System.out.println("interrupter in put");
-                        }
-                    }
-                    lineBuffer.setLength(0);
-                } else {
-                    if (lines.length > 1) {
-                        // shift the remainder
-                        lineBuffer.setLength(0);
-                        lineBuffer.append(line);
-                    }
-                }
-
-            } catch (SerialPortException ex) {
-                System.out.println(ex.toString());
             }
         }
     }
@@ -336,24 +320,7 @@ public class App {
     private void processCommand(String command) throws InvalidCommandException {
 
         if (command.startsWith("--echo")) {
-            String args[] = command.split("\\s+");
-            int val = 0;
-            if (args.length != 2) {
-                throw new InvalidCommandException("expecting exactly one argument");
-            }
-            if (args[1].equals("off")) {
-                val = 0;
-            } else if (args[1].equals("on")) {
-                val = 1;
-            } else {
-                throw new InvalidCommandException("argument of --echo can be either on or off");
-            }
-            try {
-                serialPort.writeString("uart.setup(0," + baud + ",8, 0, 1, " + val + ")\n");
-                echo = val;
-            } catch (SerialPortException ex) {
-                System.out.println("exception in echo off: " + ex);
-            }
+            processEchoCommand(command);
         } else if (command.equals("--quit")) {
             throw new EndOfFileException("terminated by user");
         } else if (command.startsWith("--set") || command.startsWith("--reset")) {
@@ -361,29 +328,10 @@ public class App {
         } else if (command.startsWith("--hexdump")) {
             processHexDumpCommand(command);
         } else if (command.equals("--ls")) {
-            try {
-                String cmd = ""
-                        + "_dir=function()\n"
-                        + "  local k,v,l\n"
-                        + "  for k,v in pairs(file.list()) do\n"
-                        + "    l=string.format(\"%-20s\",k)\n"
-                        + "    print(l..' : '..v)\n"
-                        + "  end\n"
-                        + "end\n"
-                        + "_dir()\n"
-                        + "_dir=nil\n"
-                        + "print('~~~'..'END'..'~~~')\n";
-                state = State.WAIT_FOR_MARKER;
-                serialPort.writeString(cmd);
-            } catch (SerialPortException ex) {
-                System.out.println("exception in ls: " + ex);
-            }
+            processLsCommand(command);
         } else if (command.startsWith("--cat")) {
             String args[] = command.split("\\s+");
-            if (args.length != 2) {
-                throw new InvalidCommandException("expect exactly one parameter to --cat");
-            }
-            viewFile(args[1]);
+            processCatCommand(command);
         } else if (command.startsWith("--upload")) {
             FileUploadCommandExecutor ce = new FileUploadCommandExecutor(command);
             ce.setRestoreEventListener(portReader);
@@ -402,16 +350,43 @@ public class App {
             ce.setAutoRun(autorun);
             ce.start();
         } else if (command.equals("--globals")) {
-            try {
-                String lua = "for k,v in pairs(_G) do print(k,v) end\n";
-                serialPort.writeString(lua);
-            } catch (SerialPortException ex) {
-                System.out.println("Exception when writing to serial port: " + ex);
-            }
-
+            serialPort.writeStringX("for k,v in pairs(_G) do print(k,v) end\n");
         } else {
             throw new InvalidCommandException("not a valid command");
         }
+    }
+
+    private void processLsCommand(String command) throws InvalidCommandException {
+        String cmd = ""
+                + "_dir=function()\n"
+                + "  local k,v,l\n"
+                + "  for k,v in pairs(file.list()) do\n"
+                + "    l=string.format(\"%-20s\",k)\n"
+                + "    print(l..' : '..v)\n"
+                + "  end\n"
+                + "end\n"
+                + "_dir()\n"
+                + "_dir=nil\n"
+                + "print('~~~'..'END'..'~~~')\n";
+        state = State.WAIT_FOR_MARKER;
+        serialPort.writeStringX(cmd);
+    }
+
+    private void processEchoCommand(String command) throws InvalidCommandException {
+        String args[] = command.split("\\s+");
+        int val = 0;
+        if (args.length != 2) {
+            throw new InvalidCommandException("echo expects exactly one argument");
+        }
+        if (args[1].equals("off")) {
+            val = 0;
+        } else if (args[1].equals("on")) {
+            val = 1;
+        } else {
+            throw new InvalidCommandException("argument of --echo can be either on or off");
+        }
+        serialPort.writeStringX("uart.setup(0," + baud + ",8, 0, 1, " + val + ")\n");
+        echo = val;
     }
 
     private void processSetCommand(String command) throws InvalidCommandException {
@@ -439,11 +414,16 @@ public class App {
         ce.start();
     }
 
-    private void viewFile(String filename) {
+    private void processCatCommand(String command) throws InvalidCommandException {
+        String args[];
+        args = command.split("\\s+");
+        if (args.length != 2) {
+            throw new InvalidCommandException("expect exactly one parameter to --cat");
+        }
         String cmd = ""
                 + "_view=function()\n"
                 + "  local _line, _f\n"
-                + "  _f=file.open('" + filename + "','r')\n"
+                + "  _f=file.open('" + args[1] + "','r')\n"
                 + "  repeat _line = _f:readline()\n"
                 + "    if (_line ~= nil) then\n"
                 + "      print(_line:sub(1,-2))\n"
@@ -455,11 +435,7 @@ public class App {
                 + "_view=nil\n"
                 + "print('~~~'..'END'..'~~~')\n";
         state = State.WAIT_FOR_MARKER;
-        try {
-            serialPort.writeString(cmd);
-        } catch (SerialPortException ex) {
-            System.out.println("exception in cat: " + ex);
-        }
+        serialPort.writeStringX(cmd);
     }
 
     public void openPort() throws SerialPortException {
