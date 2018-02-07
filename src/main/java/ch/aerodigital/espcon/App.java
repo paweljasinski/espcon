@@ -223,7 +223,8 @@ public class App {
                 // can do someting good here
             } catch (SerialPortXException ex) {
                 System.out.println("serial exception: " + ex);
-                // probably this should either terminate or go into device reopen loop
+                // let the  outer loop engage in reopen
+                return false;
             }
         }
     }
