@@ -37,7 +37,7 @@ public class TurboTextFileUploadCommandExecutor implements CommandExecutor {
     private State state;
 
     private static final int CHUNK_SIZE = 255; // effective payload is 254
-    private ArrayList<byte []> sendBuffer;
+    private ArrayList<byte[]> sendBuffer;
     private int sendIndex;
     private final byte[] fileReadBuffer = new byte[CHUNK_SIZE];
 
@@ -58,7 +58,7 @@ public class TurboTextFileUploadCommandExecutor implements CommandExecutor {
             target = args[2];
         }
         state = State.IDLE;
-        sendBuffer = new ArrayList<byte []>();
+        sendBuffer = new ArrayList<byte[]>();
     }
 
     public void start() throws InvalidCommandException {
@@ -82,7 +82,7 @@ public class TurboTextFileUploadCommandExecutor implements CommandExecutor {
                 + "    file.write(string.sub(b,1,s-1))"
                 + "    file.close()"
                 + "    rcv=nil"
-                + "    uart.setup(0," + baud + ",8,0,1," + echo +")\n";
+                + "    uart.setup(0," + baud + ",8,0,1," + echo + ")\n";
         String lua4 = ""
                 + "    print('\\r\\n--Done--\\r\\n> ')"
                 + "    collectgarbage()"
@@ -133,6 +133,7 @@ public class TurboTextFileUploadCommandExecutor implements CommandExecutor {
     }
 
     private class SerialPortSink implements SerialPortEventListener {
+
         private String dataCollector;
         private final SerialPortEventListener next;
 

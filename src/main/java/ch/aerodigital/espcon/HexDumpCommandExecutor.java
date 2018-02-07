@@ -15,6 +15,7 @@ import jssc.SerialPortEventListener;
 public class HexDumpCommandExecutor implements CommandExecutor {
 
     private String filename;
+
     private enum State {
         IDLE,
         LUA_TRANSFER,
@@ -96,6 +97,7 @@ public class HexDumpCommandExecutor implements CommandExecutor {
     }
 
     private class SerialPortSink implements SerialPortEventListener {
+
         private String dataCollector;
         private final SerialPortEventListener next;
 
@@ -158,7 +160,6 @@ public class HexDumpCommandExecutor implements CommandExecutor {
     public void setRestoreEventListener(SerialPortEventListener restoreEventListener) {
         this.restoreEventListener = restoreEventListener;
     }
-
 
     /**
      * @param nextSerialPortEventListener the nextSerialPortEventListener to set

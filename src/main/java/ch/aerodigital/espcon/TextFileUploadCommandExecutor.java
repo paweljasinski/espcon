@@ -101,6 +101,7 @@ public class TextFileUploadCommandExecutor implements CommandExecutor {
     }
 
     private class SerialPortSink implements SerialPortEventListener {
+
         private String dataCollector;
         private final SerialPortEventListener next;
 
