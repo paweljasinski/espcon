@@ -5,6 +5,8 @@
  */
 package ch.aerodigital.espcon;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 
 /**
@@ -18,14 +20,17 @@ public class Util {
         int i = 0;
         s256.add("");
         for (String subs : cmd.split("\n")) {
+            // TODO: this should be a string builder
             if ((s256.get(i).length() + subs.trim().length()) <= 250) {
                 s256.set(i, s256.get(i) + " " + subs.trim());
             } else {
-                s256.set(i, s256.get(i) + "\r");
+                s256.set(i, s256.get(i) + "\n");
                 s256.add(subs);
                 i++;
             }
         }
+        // s256.set(i-1, s256.get(i-1)+"\n");
+        // could help in some situations, this makes sures the last one has \n as well
         return s256;
     }
 
@@ -37,5 +42,19 @@ public class Util {
             cs = cs + (x * 20) % 19;
         }
         return cs;
+    }
+
+    public static void close(Object o) {
+        if (o instanceof InputStream) {
+            InputStream is = (InputStream)o;
+            try {
+                is.close();
+            } catch (IOException ex) {
+
+            }
+        } else {
+            System.out.println("" + o.getClass() + "is not supported yet. Need some casting code ..." );
+        }
+
     }
 }

@@ -5,7 +5,6 @@
  */
 package ch.aerodigital.espcon;
 
-import java.util.concurrent.BlockingQueue;
 import jssc.SerialPortEventListener;
 
 /**
@@ -17,8 +16,6 @@ public interface CommandExecutor {
     public void start() throws InvalidCommandException;
 
     public void setRestoreEventListener(SerialPortEventListener restoreEventListener);
-
-    public void setPromptQueue(BlockingQueue promptQueue);
 
     public void setNextSerialPortEventListener(SerialPortEventListener nextSerialPortEventListener);
 

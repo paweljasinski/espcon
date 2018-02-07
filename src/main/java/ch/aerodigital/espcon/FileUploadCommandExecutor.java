@@ -12,10 +12,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.concurrent.BlockingQueue;
 import jssc.SerialPortEvent;
 import jssc.SerialPortEventListener;
-import jssc.SerialPortException;
 
 /**
  *
@@ -51,7 +49,6 @@ public class FileUploadCommandExecutor implements CommandExecutor {
     // required to mark completion and give back the prompt
     private SerialPortEventListener restoreEventListener;
     private SerialPortEventListener nextSerialPortEventListener;
-    private BlockingQueue promptQueue;
 
     public FileUploadCommandExecutor(String command) throws InvalidCommandException {
         String args[] = command.split("\\s+");
@@ -110,19 +107,8 @@ public class FileUploadCommandExecutor implements CommandExecutor {
                 + "file.remove('" + target + "')\n";
         luaCodeBuffer = Util.cmdPrep(lua);
         luaCodeBuffer.add("_up(" + totalPackets + "," + regularPacketSize + "," + lastPacketSize + ")");
-        // TODO: this should be optional, controlled with --set
-        // System.out.println(luaCodeBuffer);
-        try {
-            serialPort.removeEventListener();
-        } catch (SerialPortException ex) {
-            System.out.println("Uploader: Unable to deactivate serial event listener " + ex);
-        }
-        try {
-            serialPort.addEventListener(new SerialPortSink(nextSerialPortEventListener));
-        } catch (SerialPortException ex) {
-            System.out.println("Uploader: Add EventListener Error. Canceled. " + ex);
-            return;
-        }
+        serialPort.removeEventListenerX();
+        serialPort.addEventListenerX(new SerialPortSink(nextSerialPortEventListener));
         sendIndex = 0;
         state = State.LUA_TRANSFER;
         sendNextPacket();
@@ -130,11 +116,7 @@ public class FileUploadCommandExecutor implements CommandExecutor {
 
     private void sendNextPacket() {
         if (sendIndex < luaCodeBuffer.size()) {
-            try {
-                serialPort.writeString(luaCodeBuffer.get(sendIndex) + "\r");
-            } catch (SerialPortException ex) {
-                System.out.println("failed to send file upload program " + ex);
-            }
+            serialPort.writeStringX(luaCodeBuffer.get(sendIndex) + "\r");
         } else if ((sendIndex - luaCodeBuffer.size()) < totalPackets) {
             state = State.FILE_TRANSFER;
             try {
@@ -144,13 +126,10 @@ public class FileUploadCommandExecutor implements CommandExecutor {
                 } else {
                     currentChunk = fileReadBuffer;
                 }
-                serialPort.writeBytes(currentChunk);
+                serialPort.writeBytesX(currentChunk);
             } catch (IOException ex) {
                 System.out.println("failed to read file chunk" + ex);
-            } catch (SerialPortException ex) {
-                System.out.println("failed to send file file chunk " + ex);
             }
-
         } else {
             try {
                 srcFileIs.close();
@@ -180,11 +159,7 @@ public class FileUploadCommandExecutor implements CommandExecutor {
                 return;
             }
 
-            try {
-                dataCollector = dataCollector + serialPort.readString(event.getEventValue());
-            } catch (SerialPortException ex) {
-                System.out.println("exception when receiving data:" + ex);
-            }
+            dataCollector = dataCollector + serialPort.readStringX(event.getEventValue());
             int promptPos;
             switch (state) {
                 case IDLE:
@@ -193,7 +168,7 @@ public class FileUploadCommandExecutor implements CommandExecutor {
                 case LUA_TRANSFER:
                     promptPos = dataCollector.indexOf("> ");
                     if (-1 != promptPos) {
-                        dataCollector = dataCollector.substring(promptPos + 3);
+                        dataCollector = dataCollector.substring(promptPos + 2);
                         sendNextPacket();
                     }
                     break;
@@ -213,29 +188,17 @@ public class FileUploadCommandExecutor implements CommandExecutor {
                     int endPos = dataCollector.indexOf("~~~END~~~");
                     if (-1 != endPos) {
                         dataCollector = dataCollector.substring(endPos + 9);
-                        try {
-                            serialPort.writeString("_up=nil\n");
-                        } catch (SerialPortException ex) {
-                            System.out.println("failed to send final command " + ex);
-                        }
+                        serialPort.writeStringX("_up=nil\n");
                         state = State.WAIT_FINAL_PROMPT;
                     }
                     break;
                 case WAIT_FINAL_PROMPT:
                     promptPos = dataCollector.indexOf("> ");
                     if (-1 != promptPos) {
-                        try {
-                            System.out.println();
-                            promptQueue.put("> ");
-                        } catch (InterruptedException ex) {
-                            System.out.println("intrerrupted when giving prompt " + ex);
-                        }
-                        try {
-                            serialPort.removeEventListener();
-                            serialPort.addEventListener(restoreEventListener);
-                        } catch (SerialPortException ex) {
-                            System.out.println("Unable to restore command line processor");
-                        }
+                        System.out.println(); // after progress dots
+                        serialPort.removeEventListenerX();
+                        serialPort.addEventListenerX(restoreEventListener);
+                        serialPort.writeStringX("\n");
                     }
                     break;
                 default:
@@ -252,16 +215,11 @@ public class FileUploadCommandExecutor implements CommandExecutor {
     }
 
     /**
-     * @param promptQueue the promptQueue to set
-     */
-    public void setPromptQueue(BlockingQueue promptQueue) {
-        this.promptQueue = promptQueue;
-    }
-
-    /**
      * @param nextSerialPortEventListener the nextSerialPortEventListener to set
      */
     public void setNextSerialPortEventListener(SerialPortEventListener nextSerialPortEventListener) {
         this.nextSerialPortEventListener = nextSerialPortEventListener;
     }
+
+
 }
