@@ -32,8 +32,10 @@ import org.jline.terminal.TerminalBuilder;
 public class App {
 
     private static String serialPortDevice = null;
-    private static Integer baud = 230400;
-    public static SerialPort serialPort;
+    public static int baud = 230400;
+    public static SerialPortX serialPort;
+    public static int echo = 0;
+    public static boolean autorun = true;
 
     private Terminal terminal;
     private History history;
@@ -128,7 +130,7 @@ public class App {
         while (!terminate) {
             try {
                 openPort();
-                state = State.REPL;
+                state = State.SYNC;
                 terminate = repl();
             } catch (SerialPortException ex) {
                 System.out.println(ex);
@@ -144,8 +146,77 @@ public class App {
         }
     }
 
+    private String timedDrain(int timeout) {
+        String prompt;
+        String lastNotNull = null;
+        long start = System.currentTimeMillis();
+        long remainder = timeout;
+        while (remainder > 0) {
+            try {
+                prompt = (String)promptQueue.poll(remainder, TimeUnit.MILLISECONDS);
+                if (prompt != null) {
+                    lastNotNull = prompt;
+                }
+            } catch (InterruptedException ex) {
+                System.out.println("Interrupted in poll: " + ex);
+            }
+            long elapsed = System.currentTimeMillis() - start;
+            remainder = timeout - elapsed;
+        }
+        return lastNotNull;
+    }
+
+    private String waitForPrompt(int timeout, int drainPeriod) {
+        String prompt = "";
+        try {
+            prompt = (String) promptQueue.poll(timeout, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException ex) {
+            System.out.println("interrupted " + ex);
+        }
+        String drainPrompt = timedDrain(drainPeriod);
+        return drainPrompt != null ? drainPrompt : prompt;
+    }
+
+
     private boolean repl() {
-        String prompt = "press ENTER to sync ... ";
+        String prompt = "";
+        while (state == State.SYNC) {
+            String line;
+            try {
+                prompt = "press ENTER to sync ... ";
+                line = reader.readLine(prompt);
+                serialPort.writeString(line + "\n");
+            } catch (SerialPortException ex) {
+                System.out.println("serial exception in sync:" + ex);
+            }
+            prompt = timedDrain(100);
+            if (prompt == null) {
+                continue;
+            }
+            if (prompt.equals(">> ")) {
+                try {
+                    System.out.println("aborting >> prompt");
+                    serialPort.writeString("x\n");
+                } catch (SerialPortException ex) {
+                    System.out.println("serial exception in sync:" + ex);
+                }
+                prompt = timedDrain(200);
+                if (prompt.equals("> ")) {
+                    state = State.REPL;
+                }
+            } else {
+                state = State.REPL;
+            }
+        }
+
+        // turn echo off
+        try {
+            serialPort.writeString("uart.setup(0," + baud + ",8, 0, 1, " + echo + ")\n");
+            prompt = timedDrain(25);
+        } catch (SerialPortException ex) {
+            System.out.println("serial exception in sync:" + ex);
+        }
+
         while (true) {
             String line;
             try {
@@ -160,7 +231,7 @@ public class App {
                 } else {
                     serialPort.writeString(line + "\r\n");
                 }
-                prompt = waitForPrompt();
+                prompt = waitForPrompt(2000, 25);
             } catch (SerialPortException ex) {
                 System.out.println("unable to send serial: " + ex);
             } catch (UserInterruptException e) {
@@ -262,14 +333,6 @@ public class App {
 
     private final BlockingQueue promptQueue = new ArrayBlockingQueue(10);
 
-    private String waitForPrompt() {
-        try {
-            return (String) promptQueue.poll(2000, TimeUnit.MILLISECONDS); // TODO: This timeout should be extendable
-        } catch (InterruptedException ex) {
-            System.out.println("interrupted " + ex);
-        }
-        return "? ";
-    }
 
     private void processCommand(String command) throws InvalidCommandException {
 
@@ -288,11 +351,16 @@ public class App {
             }
             try {
                 serialPort.writeString("uart.setup(0," + baud + ",8, 0, 1, " + val + ")\n");
+                echo = val;
             } catch (SerialPortException ex) {
                 System.out.println("exception in echo off: " + ex);
             }
         } else if (command.equals("--quit")) {
             throw new EndOfFileException("terminated by user");
+        } else if (command.startsWith("--set") || command.startsWith("--reset")) {
+            processSetCommand(command);
+        } else if (command.startsWith("--hexdump")) {
+            processHexDumpCommand(command);
         } else if (command.equals("--ls")) {
             try {
                 String cmd = ""
@@ -320,15 +388,19 @@ public class App {
         } else if (command.startsWith("--upload")) {
             FileUploadCommandExecutor ce = new FileUploadCommandExecutor(command);
             ce.setRestoreEventListener(portReader);
-            ce.setPromptQueue(promptQueue);
             ce.setNextSerialPortEventListener(commonSerialEventSink);
             ce.start();
         } else if (command.startsWith("--save")) {
             TextFileUploadCommandExecutor ce = new TextFileUploadCommandExecutor(command);
             ce.setRestoreEventListener(portReader);
-            ce.setPromptQueue(promptQueue);
             ce.setNextSerialPortEventListener(commonSerialEventSink);
-            ce.setAutoRun(false);
+            ce.setAutoRun(autorun);
+            ce.start();
+        } else if (command.startsWith("--tsave")) {
+            TurboTextFileUploadCommandExecutor ce = new TurboTextFileUploadCommandExecutor(command);
+            ce.setRestoreEventListener(portReader);
+            ce.setNextSerialPortEventListener(commonSerialEventSink);
+            ce.setAutoRun(autorun);
             ce.start();
         } else if (command.equals("--globals")) {
             try {
@@ -341,6 +413,31 @@ public class App {
         } else {
             throw new InvalidCommandException("not a valid command");
         }
+    }
+
+    private void processSetCommand(String command) throws InvalidCommandException {
+        String args[] = command.split("\\s+");
+        if (args.length != 2) {
+            throw new InvalidCommandException("set/reset requires exactly one parameter");
+        }
+        boolean isSet = args[0].equals("--set");
+        if (args[1].equals("autorun")) {
+            autorun = isSet;
+        } else {
+            throw new InvalidCommandException("unrecognize set/reset argument: " + args[1]);
+        }
+        try {
+            promptQueue.put("> ");
+        } catch (InterruptedException ex) {
+            System.out.println("interrupter in put");
+        }
+    }
+
+    private void processHexDumpCommand(String command) throws InvalidCommandException {
+        HexDumpCommandExecutor ce = new HexDumpCommandExecutor(command);
+        ce.setRestoreEventListener(portReader);
+        ce.setNextSerialPortEventListener(commonSerialEventSink);
+        ce.start();
     }
 
     private void viewFile(String filename) {
@@ -364,7 +461,6 @@ public class App {
         } catch (SerialPortException ex) {
             System.out.println("exception in cat: " + ex);
         }
-
     }
 
     public void openPort() throws SerialPortException {
@@ -376,7 +472,7 @@ public class App {
             }
         }
         System.out.println("About to open port " + serialPortDevice + ", baud " + baud + ", 8N1");
-        serialPort = new SerialPort(serialPortDevice);
+        serialPort = new SerialPortX(serialPortDevice);
         serialPort.openPort();
         serialPort.setParams(baud, SerialPort.DATABITS_8,
                 SerialPort.STOPBITS_1, SerialPort.PARITY_NONE, false, false);
