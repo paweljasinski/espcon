@@ -153,7 +153,7 @@ public class App {
         long remainder = timeout;
         while (remainder > 0) {
             try {
-                prompt = (String)promptQueue.poll(remainder, TimeUnit.MILLISECONDS);
+                prompt = (String) promptQueue.poll(remainder, TimeUnit.MILLISECONDS);
                 if (prompt != null) {
                     lastNotNull = prompt;
                 }
@@ -176,7 +176,6 @@ public class App {
         String drainPrompt = timedDrain(drainPeriod);
         return drainPrompt != null ? drainPrompt : prompt;
     }
-
 
     private boolean repl() {
         String prompt = "";
@@ -241,6 +240,7 @@ public class App {
     }
 
     private class CommonSerialPortEventSink implements SerialPortEventListener {
+
         public void serialEvent(SerialPortEvent event) {
             if (event.isBREAK()) {
                 System.out.println("BREAK");
@@ -332,7 +332,6 @@ public class App {
     }
 
     private final BlockingQueue promptQueue = new ArrayBlockingQueue(10);
-
 
     private void processCommand(String command) throws InvalidCommandException {
 
@@ -476,9 +475,9 @@ public class App {
         serialPort.openPort();
         serialPort.setParams(baud, SerialPort.DATABITS_8,
                 SerialPort.STOPBITS_1, SerialPort.PARITY_NONE, false, false);
-        serialPort.setEventsMask(SerialPort.MASK_BREAK | SerialPort.MASK_CTS | SerialPort.MASK_DSR |
-                SerialPort.MASK_ERR | SerialPort.MASK_RING | SerialPort.MASK_RLSD | SerialPort.MASK_RXCHAR |
-                SerialPort.MASK_RXFLAG | SerialPort.MASK_TXEMPTY);
+        serialPort.setEventsMask(SerialPort.MASK_BREAK | SerialPort.MASK_CTS | SerialPort.MASK_DSR
+                | SerialPort.MASK_ERR | SerialPort.MASK_RING | SerialPort.MASK_RLSD | SerialPort.MASK_RXCHAR
+                | SerialPort.MASK_RXFLAG | SerialPort.MASK_TXEMPTY);
         serialPort.addEventListener(portReader);
     }
 

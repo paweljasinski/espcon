@@ -46,14 +46,14 @@ public class Util {
 
     public static void close(Object o) {
         if (o instanceof InputStream) {
-            InputStream is = (InputStream)o;
+            InputStream is = (InputStream) o;
             try {
                 is.close();
             } catch (IOException ex) {
 
             }
         } else {
-            System.out.println("" + o.getClass() + "is not supported yet. Need some casting code ..." );
+            System.out.println("" + o.getClass() + "is not supported yet. Need some casting code ...");
         }
 
     }

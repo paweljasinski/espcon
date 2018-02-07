@@ -221,5 +221,4 @@ public class FileUploadCommandExecutor implements CommandExecutor {
         this.nextSerialPortEventListener = nextSerialPortEventListener;
     }
 
-
 }

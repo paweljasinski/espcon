@@ -29,9 +29,9 @@ public class SerialPortX extends SerialPort {
 
     public void writeStringX(String string) {
         try {
-            boolean ret =  super.writeString(string);
+            boolean ret = super.writeString(string);
             if (!ret) {
-                throw new SerialPortXException("writeStringX failed" );
+                throw new SerialPortXException("writeStringX failed");
             }
         } catch (SerialPortException ex) {
             throw new SerialPortXException("exception in writeStringX - " + ex.getMessage(), ex);
@@ -40,19 +40,20 @@ public class SerialPortX extends SerialPort {
 
     public void writeBytesX(byte[] bytes) {
         try {
-            boolean ret =  super.writeBytes(bytes);
+            boolean ret = super.writeBytes(bytes);
             if (!ret) {
-                throw new SerialPortXException("writeBytesX failed" );
+                throw new SerialPortXException("writeBytesX failed");
             }
         } catch (SerialPortException ex) {
             throw new SerialPortXException("exception in writeBytesX - " + ex.getMessage(), ex);
         }
     }
+
     public void writeStringX(String string, String context) {
         try {
-            boolean ret =  super.writeString(string);
+            boolean ret = super.writeString(string);
             if (!ret) {
-                throw new SerialPortXException("writeStringX failed ["+ context + "] ");
+                throw new SerialPortXException("writeStringX failed [" + context + "] ");
             }
         } catch (SerialPortException ex) {
             throw new SerialPortXException("exception in writeStringX [" + context + "] " + ex.getMessage(), ex);

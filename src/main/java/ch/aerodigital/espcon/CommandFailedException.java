@@ -10,6 +10,7 @@ package ch.aerodigital.espcon;
  * @author rejap
  */
 class CommandFailedException extends Exception {
+
     public CommandFailedException(String message) {
         super(message);
     }
