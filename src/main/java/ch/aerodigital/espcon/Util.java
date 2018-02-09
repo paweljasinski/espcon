@@ -5,8 +5,8 @@
  */
 package ch.aerodigital.espcon;
 
+import java.io.Closeable;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.ArrayList;
 
 /**
@@ -44,17 +44,11 @@ public class Util {
         return cs;
     }
 
-    public static void close(Object o) {
-        if (o instanceof InputStream) {
-            InputStream is = (InputStream) o;
-            try {
-                is.close();
-            } catch (IOException ex) {
-
-            }
-        } else {
-            System.out.println("" + o.getClass() + "is not supported yet. Need some casting code ...");
+    public static void close(Closeable closeable) {
+        try {
+            closeable.close();
+        } catch (IOException ex) {
+            // ignore
         }
-
     }
 }
