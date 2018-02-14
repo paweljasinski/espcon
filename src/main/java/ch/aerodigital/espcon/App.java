@@ -21,7 +21,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import jssc.SerialPort;
 import jssc.SerialPortEvent;
-import jssc.SerialPortEventListener;
 import jssc.SerialPortException;
 import jssc.SerialPortList;
 import org.apache.commons.cli.CommandLine;
@@ -68,9 +67,6 @@ public class App {
     private Terminal systemTerminal;
     private History history;
     private LineReader reader;
-
-    private final InteractiveSerialPortSink portReader;
-    private final CommonSerialPortEventSink commonSerialEventSink;
 
     private static final String MARKER = "~~~END~~~";
 
@@ -158,8 +154,6 @@ public class App {
     }
 
     public App() {
-        commonSerialEventSink = new CommonSerialPortEventSink();
-        portReader = new InteractiveSerialPortSink(commonSerialEventSink);
         state = State.DISCONNECTED;
         try {
             systemTerminal = TerminalBuilder.builder().system(true).build();
@@ -434,7 +428,7 @@ public class App {
                 openPort();
                 state = State.SYNC;
                 terminate = repl();
-            } catch (SerialPortException ex) {
+            } catch (SerialPortXException ex) {
                 console.writer().println(ex);
                 reader.readLine("press ENTER to try again ... ");
             } catch (EndOfFileException ex) {
@@ -531,45 +525,13 @@ public class App {
         }
     }
 
-    private class CommonSerialPortEventSink implements SerialPortEventListener {
-
-        public void serialEvent(SerialPortEvent event) {
-            if (event.isBREAK()) {
-                System.out.println("BREAK");
-            } else if (event.isCTS()) {
-                System.out.println("CTS:" + event.getEventValue());
-            } else if (event.isDSR()) {
-                System.out.println("DSR:" + event.getEventValue());
-            } else if (event.isERR()) {
-                System.out.println(String.format("ERR: 0x04X", event.getEventValue()));
-            } else if (event.isRING()) {
-                System.out.println("RING:" + event.getEventValue());
-            } else if (event.isRLSD()) {
-                System.out.println("RLSD:" + event.getEventValue());
-            } else if (event.isRXCHAR()) {
-                System.out.println("RXCHAR:" + event.getEventValue());
-            } else if (event.isRXFLAG()) {
-                System.out.println("RXFLAG:" + event.getEventValue());
-            } else if (event.isTXEMPTY()) {
-                System.out.println("TXEMPTY:" + event.getEventValue());
-            }
-        }
-    }
-
-    private class InteractiveSerialPortSink implements SerialPortEventListener {
-
-        private SerialPortEventListener next;
-
-        public InteractiveSerialPortSink(SerialPortEventListener next) {
-            this.next = next;
-        }
+    private class InteractiveSerialPortSink implements SerialPortEventListenerX {
 
         private final StringBuilder lineBuffer = new StringBuilder(1024);
 
-        public void serialEvent(SerialPortEvent event) {
+        public boolean serialEvent(SerialPortEvent event) {
             if (!event.isRXCHAR() || event.getEventValue() <= 0) {
-                next.serialEvent(event);
-                return;
+                return false;
             }
             String data = serialPort.readStringX(event.getEventValue());
             lineBuffer.append(data);
@@ -596,7 +558,7 @@ public class App {
             // input ends with new line
             if (line.length() == 0) {
                 lineBuffer.setLength(0);
-                return;
+                return true;
             }
             // from here, only not empty last line, not followed with newline
             if (line.startsWith("> ") || line.startsWith(">> ")) {
@@ -615,6 +577,7 @@ public class App {
                     lineBuffer.append(line);
                 }
             }
+            return true;
         }
     }
 
@@ -629,7 +592,9 @@ public class App {
         } else if (command.startsWith("--set") || command.startsWith("--reset")) {
             processSetCommand(command);
         } else if (command.startsWith("--hexdump")) {
-            processHexDumpCommand(command);
+            HexDumpCommandExecutor ce = new HexDumpCommandExecutor(command);
+            ce.setWriter(console.writer());
+            ce.start();
         } else if (command.equals("--ls")) {
             processLsCommand(command);
         } else if (command.startsWith("--cat")) {
@@ -638,21 +603,15 @@ public class App {
         } else if (command.startsWith("--upload")) {
             FileUploadCommandExecutor ce = new FileUploadCommandExecutor(command);
             ce.setWriter(console.writer());
-            ce.setRestoreEventListener(portReader);
-            ce.setNextSerialPortEventListener(commonSerialEventSink);
             ce.start();
         } else if (command.startsWith("--save")) {
             TextFileUploadCommandExecutor ce = new TextFileUploadCommandExecutor(command);
             ce.setWriter(console.writer());
-            ce.setRestoreEventListener(portReader);
-            ce.setNextSerialPortEventListener(commonSerialEventSink);
             ce.setAutoRun(autorun);
             ce.start();
         } else if (command.startsWith("--tsave")) {
             TurboTextFileUploadCommandExecutor ce = new TurboTextFileUploadCommandExecutor(command);
             ce.setWriter(console.writer());
-            ce.setRestoreEventListener(portReader);
-            ce.setNextSerialPortEventListener(commonSerialEventSink);
             ce.setAutoRun(autorun);
             ce.start();
         } else if (command.equals("--globals")) {
@@ -713,14 +672,6 @@ public class App {
         }
     }
 
-    private void processHexDumpCommand(String command) throws InvalidCommandException {
-        HexDumpCommandExecutor ce = new HexDumpCommandExecutor(command);
-        ce.setWriter(console.writer());
-        ce.setRestoreEventListener(portReader);
-        ce.setNextSerialPortEventListener(commonSerialEventSink);
-        ce.start();
-    }
-
     private void processCatCommand(String command) throws InvalidCommandException {
         String args[];
         args = command.split("\\s+");
@@ -745,23 +696,65 @@ public class App {
         serialPort.writeStringX(cmd);
     }
 
-    public void openPort() throws SerialPortException {
+    public void openPort() {
         if (null != serialPort && serialPort.isOpened()) {
             try {
                 serialPort.closePort();
             } catch (SerialPortException ex) {
-                console.writer().println("exception when closing serial port: " + ex);
+                // don't care
             }
         }
         console.writer().println("About to open port " + serialPortDevice + ", baud " + baud + ", 8N1");
         serialPort = new SerialPortX(serialPortDevice);
-        serialPort.openPort();
-        serialPort.setParams(baud, SerialPort.DATABITS_8,
+        serialPort.openPortX();
+        serialPort.setParamsX(baud, SerialPort.DATABITS_8,
                 SerialPort.STOPBITS_1, SerialPort.PARITY_NONE, false, false);
-        serialPort.setEventsMask(SerialPort.MASK_BREAK | SerialPort.MASK_CTS | SerialPort.MASK_DSR
-                | SerialPort.MASK_ERR | SerialPort.MASK_RING | SerialPort.MASK_RLSD | SerialPort.MASK_RXCHAR
-                | SerialPort.MASK_RXFLAG | SerialPort.MASK_TXEMPTY);
-        serialPort.addEventListener(portReader);
+        serialPort.installCommonEventListener(new CommonEventListener());
+        serialPort.pushEventListener(new InteractiveSerialPortSink());
+    }
+
+    private class CommonEventListener implements SerialPortEventListenerX {
+
+        public boolean serialEvent(SerialPortEvent event) {
+
+            if (event.isBREAK()) {
+                System.out.println("BREAK");
+                return true;
+            }
+            if (event.isCTS()) {
+                System.out.println("CTS:" + event.getEventValue());
+                return true;
+            }
+            if (event.isDSR()) {
+                System.out.println("DSR:" + event.getEventValue());
+                return true;
+            }
+            if (event.isERR()) {
+                System.out.println(String.format("ERR: 0x04X", event.getEventValue()));
+                return true;
+            }
+            if (event.isRING()) {
+                System.out.println("RING:" + event.getEventValue());
+                return true;
+            }
+            if (event.isRLSD()) {
+                System.out.println("RLSD:" + event.getEventValue());
+                return true;
+            }
+            if (event.isRXCHAR()) {
+                System.out.println("RXCHAR:" + event.getEventValue());
+                return true;
+            }
+            if (event.isRXFLAG()) {
+                System.out.println("RXFLAG:" + event.getEventValue());
+                return true;
+            }
+            if (event.isTXEMPTY()) {
+                System.out.println("TXEMPTY:" + event.getEventValue());
+                return true;
+            }
+            return false;
+        }
     }
 
     private void dump(String p, String s) {

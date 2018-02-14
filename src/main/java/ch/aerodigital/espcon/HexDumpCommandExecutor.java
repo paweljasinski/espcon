@@ -6,7 +6,6 @@ package ch.aerodigital.espcon;
 import static ch.aerodigital.espcon.App.serialPort;
 import java.util.ArrayList;
 import jssc.SerialPortEvent;
-import jssc.SerialPortEventListener;
 
 /**
  *
@@ -71,8 +70,7 @@ public class HexDumpCommandExecutor extends AbstractCommandExecutor {
                 + "_dump()\n"
                 + "_dump=nil\n";
         sendBuffer = Util.cmdPrep(cmd);
-        serialPort.removeEventListenerX();
-        serialPort.addEventListenerX(new SerialPortSink(nextSerialPortEventListener));
+        serialPort.pushEventListener(new SerialPortSink());
         sendIndex = 0;
         state = State.LUA_TRANSFER;
         sendNext();
@@ -88,27 +86,18 @@ public class HexDumpCommandExecutor extends AbstractCommandExecutor {
         }
     }
 
-    private void completed() {
-        serialPort.removeEventListenerX();
-        serialPort.addEventListenerX(restoreEventListener);
-    }
-
-    private class SerialPortSink implements SerialPortEventListener {
+    private class SerialPortSink implements SerialPortEventListenerX {
 
         private String dataCollector;
-        private final SerialPortEventListener next;
 
-        public SerialPortSink(SerialPortEventListener next) {
+        public SerialPortSink() {
             dataCollector = "";
-            this.next = next;
         }
 
-        public void serialEvent(SerialPortEvent event) {
+        @Override
+        public boolean serialEvent(SerialPortEvent event) {
             if (!event.isRXCHAR() || event.getEventValue() <= 0) {
-                if (next != null) {
-                    next.serialEvent(event);
-                }
-                return;
+                return false;
             }
             dataCollector = dataCollector + serialPort.readStringX(event.getEventValue());
             switch (state) {
@@ -124,7 +113,7 @@ public class HexDumpCommandExecutor extends AbstractCommandExecutor {
                     }
                     int errMarkerPos = dataCollector.indexOf("--HexDump error");
                     if (-1 != errMarkerPos) {
-                        completed();
+                        serialPort.popEventListener();
                         serialPort.writeStringX("\n");
                         break;
                     }
@@ -139,7 +128,7 @@ public class HexDumpCommandExecutor extends AbstractCommandExecutor {
                     int endMarkerPos = dataCollector.indexOf("--HexDump done");
                     if (-1 != endMarkerPos) {
                         dataCollector = dataCollector.substring(endMarkerPos + 15);
-                        completed();
+                        serialPort.popEventListener();
                         break;
                     }
                     writer.print(dataCollector);
@@ -149,6 +138,7 @@ public class HexDumpCommandExecutor extends AbstractCommandExecutor {
                 default:
                     break;
             }
+            return true;
         }
     }
 }

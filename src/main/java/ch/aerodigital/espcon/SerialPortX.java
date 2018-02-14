@@ -5,7 +5,9 @@
  */
 package ch.aerodigital.espcon;
 
+import java.util.Stack;
 import jssc.SerialPort;
+import jssc.SerialPortEvent;
 import jssc.SerialPortEventListener;
 import jssc.SerialPortException;
 
@@ -15,8 +17,70 @@ import jssc.SerialPortException;
  */
 public class SerialPortX extends SerialPort {
 
+    private SerialPortEventListenerX commonEventListener;
+
+    private Stack<SerialPortEventListenerX> eventListeners;
+
     public SerialPortX(String portName) {
         super(portName);
+        eventListeners = new Stack<SerialPortEventListenerX>();
+    }
+
+    public boolean closePortX() {
+        try {
+            boolean ret = super.closePort();
+            return ret;
+        } catch (SerialPortException ex) {
+            throw new SerialPortXException("exception in closePortX - " + ex.getMessage(), ex);
+        }
+    }
+
+    public void openPortX() {
+        boolean ret = false;
+        try {
+            ret = openPort();
+        } catch (SerialPortException ex) {
+            throw new SerialPortXException("failed to open port - " + ex.getMessage(), ex);
+        }
+        if (!ret) {
+            throw new SerialPortXException("failed to open port");
+        }
+        try {
+            ret = setEventsMask(SerialPort.MASK_BREAK | SerialPort.MASK_CTS | SerialPort.MASK_DSR
+                    | SerialPort.MASK_ERR | SerialPort.MASK_RING | SerialPort.MASK_RLSD | SerialPort.MASK_RXCHAR
+                    | SerialPort.MASK_RXFLAG | SerialPort.MASK_TXEMPTY);
+        } catch (SerialPortException ex) {
+            throw new SerialPortXException("failed to set event mask - " + ex.getMessage(), ex);
+        }
+        if (!ret) {
+            throw new SerialPortXException("failed to set event mask");
+        }
+        addEventListenerX(new MasterEventListener());
+    }
+
+    public void setParamsX(int baudRate, int dataBits, int stopBits, int parity, boolean setRTS, boolean setDTR) {
+        boolean ret = false;
+        try {
+            ret = setParams(baudRate, dataBits, stopBits, parity, setRTS, setDTR);
+        } catch (SerialPortException ex) {
+            throw new SerialPortXException("failed to set port parameters - " + ex.getMessage(), ex);
+        }
+        if (!ret) {
+            throw new SerialPortXException("failed to set port parameters");
+        }
+    }
+
+    private class MasterEventListener implements SerialPortEventListener {
+
+        public void serialEvent(SerialPortEvent event) {
+            boolean processed = false;
+            if (!eventListeners.empty()) {
+                processed = eventListeners.peek().serialEvent(event);
+            }
+            if (!processed && commonEventListener != null) {
+                commonEventListener.serialEvent(event);
+            }
+        }
     }
 
     public String readStringX(int byteCount) {
@@ -60,7 +124,7 @@ public class SerialPortX extends SerialPort {
         }
     }
 
-    public void removeEventListenerX() {
+    private void removeEventListenerX() {
         try {
             boolean ret = super.removeEventListener();
             if (!ret) {
@@ -71,12 +135,24 @@ public class SerialPortX extends SerialPort {
         }
     }
 
-    public void addEventListenerX(SerialPortEventListener listener) {
+    private void addEventListenerX(SerialPortEventListener listener) {
         try {
             super.addEventListener(listener);
         } catch (SerialPortException ex) {
             throw new SerialPortXException(ex.getMessage(), ex);
         }
+    }
+
+    public void pushEventListener(SerialPortEventListenerX listener) {
+        eventListeners.push(listener);
+    }
+
+    public void popEventListener() {
+        eventListeners.pop();
+    }
+
+    public void installCommonEventListener(SerialPortEventListenerX listener) {
+        commonEventListener = listener;
     }
 
 }

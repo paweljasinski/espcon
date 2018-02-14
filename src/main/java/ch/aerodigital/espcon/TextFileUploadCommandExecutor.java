@@ -10,7 +10,6 @@ import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import jssc.SerialPortEvent;
-import jssc.SerialPortEventListener;
 
 /**
  *
@@ -61,8 +60,7 @@ public class TextFileUploadCommandExecutor extends AbstractCommandExecutor {
                 + "file.open('" + target + "','w+') "
                 + "w=file.writeline\n";
         // writer.println(lua);
-        serialPort.removeEventListenerX();
-        serialPort.addEventListenerX(new SerialPortSink(nextSerialPortEventListener));
+        serialPort.pushEventListener(new SerialPortSink());
         state = State.LUA_TRANSFER;
         serialPort.writeStringX(lua);
     }
@@ -97,25 +95,19 @@ public class TextFileUploadCommandExecutor extends AbstractCommandExecutor {
         }
     }
 
-    private class SerialPortSink implements SerialPortEventListener {
+    private class SerialPortSink implements SerialPortEventListenerX {
 
         private String dataCollector;
-        private final SerialPortEventListener next;
 
-        public SerialPortSink(SerialPortEventListener next) {
+        public SerialPortSink() {
             dataCollector = "";
-            this.next = next;
         }
 
-        public void serialEvent(SerialPortEvent event) {
+        @Override
+        public boolean serialEvent(SerialPortEvent event) {
             if (!event.isRXCHAR() || event.getEventValue() <= 0) {
-                if (next != null) {
-                    next.serialEvent(event);
-                }
-                return;
-            }
-
-            dataCollector = dataCollector + serialPort.readStringX(event.getEventValue());
+                return false;
+            }            dataCollector = dataCollector + serialPort.readStringX(event.getEventValue());
             int promptPos;
             switch (state) {
                 case IDLE:
@@ -133,8 +125,7 @@ public class TextFileUploadCommandExecutor extends AbstractCommandExecutor {
                     promptPos = dataCollector.indexOf("> ");
                     if (-1 != promptPos) {
                         dataCollector = dataCollector.substring(promptPos + 2);
-                        serialPort.removeEventListenerX();
-                        serialPort.addEventListenerX(restoreEventListener);
+                        serialPort.popEventListener();
                         serialPort.writeStringX("\n");
                     }
                     break;
@@ -142,8 +133,7 @@ public class TextFileUploadCommandExecutor extends AbstractCommandExecutor {
                     promptPos = dataCollector.indexOf("> ");
                     if (-1 != promptPos) {
                         dataCollector = dataCollector.substring(promptPos + 2);
-                        serialPort.removeEventListenerX();
-                        serialPort.addEventListenerX(restoreEventListener);
+                        serialPort.popEventListener();
                         serialPort.writeStringX("\n");
                     }
                     writer.print(dataCollector);
@@ -153,6 +143,7 @@ public class TextFileUploadCommandExecutor extends AbstractCommandExecutor {
                 default:
                     break;
             }
+            return true;
         }
     }
 

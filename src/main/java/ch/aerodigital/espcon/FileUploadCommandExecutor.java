@@ -13,7 +13,6 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import jssc.SerialPortEvent;
-import jssc.SerialPortEventListener;
 
 /**
  *
@@ -105,8 +104,7 @@ public class FileUploadCommandExecutor extends AbstractCommandExecutor {
                 + "file.remove('" + target + "')\n";
         luaCodeBuffer = Util.cmdPrep(lua);
         luaCodeBuffer.add("_up(" + totalPackets + "," + regularPacketSize + "," + lastPacketSize + ")");
-        serialPort.removeEventListenerX();
-        serialPort.addEventListenerX(new SerialPortSink(nextSerialPortEventListener));
+        serialPort.pushEventListener(new SerialPortSink());
         sendIndex = 0;
         state = State.LUA_TRANSFER;
         sendNextPacket();
@@ -139,22 +137,18 @@ public class FileUploadCommandExecutor extends AbstractCommandExecutor {
         sendIndex++;
     }
 
-    private class SerialPortSink implements SerialPortEventListener {
+    private class SerialPortSink implements SerialPortEventListenerX {
 
         private String dataCollector;
-        private final SerialPortEventListener next;
 
-        public SerialPortSink(SerialPortEventListener next) {
+        public SerialPortSink() {
             dataCollector = "";
-            this.next = next;
         }
 
-        public void serialEvent(SerialPortEvent event) {
+        @Override
+        public boolean serialEvent(SerialPortEvent event) {
             if (!event.isRXCHAR() || event.getEventValue() <= 0) {
-                if (next != null) {
-                    next.serialEvent(event);
-                }
-                return;
+                return false;
             }
 
             dataCollector = dataCollector + serialPort.readStringX(event.getEventValue());
@@ -195,15 +189,14 @@ public class FileUploadCommandExecutor extends AbstractCommandExecutor {
                     promptPos = dataCollector.indexOf("> ");
                     if (-1 != promptPos) {
                         writer.println(); // after writer dots
-                        serialPort.removeEventListenerX();
-                        serialPort.addEventListenerX(restoreEventListener);
+                        serialPort.popEventListener();
                         serialPort.writeStringX("\n");
                     }
                     break;
                 default:
                     break;
             }
+            return true;
         }
     }
-
 }
