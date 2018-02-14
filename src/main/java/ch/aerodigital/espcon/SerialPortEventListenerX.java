@@ -5,16 +5,18 @@
  */
 package ch.aerodigital.espcon;
 
-import java.io.PrintWriter;
+import jssc.SerialPortEvent;
 
 /**
  *
  * @author rejap
  */
-public interface CommandExecutor {
+public interface SerialPortEventListenerX {
 
-    public void start() throws InvalidCommandException;
-
-    public void setWriter(PrintWriter writer);
-
+    /**
+     *
+     * @param event
+     * @return true if event was processed, false otherwise
+     */
+    public boolean serialEvent(SerialPortEvent event);
 }

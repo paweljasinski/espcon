@@ -15,7 +15,6 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import jssc.SerialPortEvent;
-import jssc.SerialPortEventListener;
 
 /**
  *
@@ -109,8 +108,7 @@ public class TurboTextFileUploadCommandExecutor extends AbstractCommandExecutor 
             throw new InvalidCommandException("Failed to read file chunk" + ex);
         }
         Util.close(srcFileIs);
-        serialPort.removeEventListenerX();
-        serialPort.addEventListenerX(new SerialPortSink(nextSerialPortEventListener));
+        serialPort.pushEventListener(new SerialPortSink());
         sendIndex = 0;
         state = State.BUF_TRANSFER;
         sendNext();
@@ -123,29 +121,21 @@ public class TurboTextFileUploadCommandExecutor extends AbstractCommandExecutor 
         }
     }
 
-    private void completed() {
-        serialPort.removeEventListenerX();
-        serialPort.addEventListenerX(restoreEventListener);
-    }
 
-    private class SerialPortSink implements SerialPortEventListener {
+
+    private class SerialPortSink implements SerialPortEventListenerX {
 
         private String dataCollector;
-        private final SerialPortEventListener next;
 
-        public SerialPortSink(SerialPortEventListener next) {
+        public SerialPortSink() {
             dataCollector = "";
-            this.next = next;
         }
 
-        public void serialEvent(SerialPortEvent event) {
+        @Override
+        public boolean serialEvent(SerialPortEvent event) {
             if (!event.isRXCHAR() || event.getEventValue() <= 0) {
-                if (next != null) {
-                    next.serialEvent(event);
-                }
-                return;
-            }
-            dataCollector = dataCollector + serialPort.readStringX(event.getEventValue());
+                return false;
+            }            dataCollector = dataCollector + serialPort.readStringX(event.getEventValue());
             switch (state) {
                 case IDLE:
                     writer.println("unexpected data when in idle: " + dataCollector);
@@ -158,7 +148,7 @@ public class TurboTextFileUploadCommandExecutor extends AbstractCommandExecutor 
                             dataCollector = dataCollector.substring(endPos + 12);
                             state = State.AUTORUN;
                         } else {
-                            completed();
+                            serialPort.popEventListener();
                         }
                         serialPort.writeStringX("\n"); // get next prompt, here or outside
                     } else {
@@ -174,13 +164,14 @@ public class TurboTextFileUploadCommandExecutor extends AbstractCommandExecutor 
                 case AUTORUN:
                     int promptPos = dataCollector.indexOf("> ");
                     if (-1 != promptPos) {
-                        completed();
+                        serialPort.popEventListener();
                         serialPort.writeStringX(("dofile('" + target + "')\n"));
                     }
                     break;
                 default:
                     break;
             }
+            return true;
         }
     }
 
