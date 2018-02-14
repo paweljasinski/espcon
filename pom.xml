@@ -12,8 +12,14 @@
       <groupId>org.jline</groupId>
       <artifactId>jline</artifactId>
       <version>3.6.1-SNAPSHOT</version>
+      <type>jar</type>
     </dependency>
     <dependency>
+      <groupId>org.jline</groupId>
+      <artifactId>jline-builtins</artifactId>
+      <version>3.6.1-SNAPSHOT</version>
+      <type>jar</type>
+    </dependency>    <dependency>
       <groupId>org.scream3r</groupId>
       <artifactId>jssc</artifactId>
       <version>2.8.0</version>
@@ -29,6 +35,7 @@
       <version>3.8.1</version>
       <scope>test</scope>
     </dependency>
+
   </dependencies>
 <build>
   <plugins>
@@ -71,4 +78,8 @@
 </plugin>
   </plugins>
 </build>
+    <properties>
+        <maven.compiler.source>1.8</maven.compiler.source>
+        <maven.compiler.target>1.8</maven.compiler.target>
+    </properties>
 </project>

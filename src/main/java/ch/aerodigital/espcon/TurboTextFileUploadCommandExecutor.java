@@ -21,7 +21,7 @@ import jssc.SerialPortEventListener;
  *
  * @author Pawel Jasinski
  */
-public class TurboTextFileUploadCommandExecutor implements CommandExecutor {
+public class TurboTextFileUploadCommandExecutor extends AbstractCommandExecutor {
 
     private String src;
     private String target;
@@ -41,11 +41,7 @@ public class TurboTextFileUploadCommandExecutor implements CommandExecutor {
     private int sendIndex;
     private final byte[] fileReadBuffer = new byte[CHUNK_SIZE];
 
-    // required to mark completion and give back the prompt
-    private SerialPortEventListener restoreEventListener;
-    private SerialPortEventListener nextSerialPortEventListener;
-
-    public TurboTextFileUploadCommandExecutor(String command) throws InvalidCommandException {
+     public TurboTextFileUploadCommandExecutor(String command) throws InvalidCommandException {
         String args[] = command.split("\\s+");
         if (args.length == 1 || args.length > 3) {
             throw new InvalidCommandException("upload needs 1 or 2 arguments");
@@ -152,12 +148,12 @@ public class TurboTextFileUploadCommandExecutor implements CommandExecutor {
             dataCollector = dataCollector + serialPort.readStringX(event.getEventValue());
             switch (state) {
                 case IDLE:
-                    System.out.println("unexpected data when in idle: " + dataCollector);
+                    writer.println("unexpected data when in idle: " + dataCollector);
                     break;
                 case BUF_TRANSFER:
                     int endPos = dataCollector.indexOf("\r\n--Done--\r\n> ");
                     if (-1 != endPos) {
-                        System.out.println(); // after dots
+                        writer.println(); // after dots
                         if (autoRun) {
                             dataCollector = dataCollector.substring(endPos + 12);
                             state = State.AUTORUN;
@@ -169,7 +165,8 @@ public class TurboTextFileUploadCommandExecutor implements CommandExecutor {
                         int promptPos = dataCollector.indexOf("> ");
                         if (-1 != promptPos) {
                             dataCollector = dataCollector.substring(promptPos + 2);
-                            System.out.print(".");
+                            writer.print(".");
+                            writer.flush();
                             sendNext();
                         }
                     }
@@ -185,20 +182,6 @@ public class TurboTextFileUploadCommandExecutor implements CommandExecutor {
                     break;
             }
         }
-    }
-
-    /**
-     * @param restoreEventListener the restoreEventListener to set
-     */
-    public void setRestoreEventListener(SerialPortEventListener restoreEventListener) {
-        this.restoreEventListener = restoreEventListener;
-    }
-
-    /**
-     * @param nextSerialPortEventListener the nextSerialPortEventListener to set
-     */
-    public void setNextSerialPortEventListener(SerialPortEventListener nextSerialPortEventListener) {
-        this.nextSerialPortEventListener = nextSerialPortEventListener;
     }
 
     /**

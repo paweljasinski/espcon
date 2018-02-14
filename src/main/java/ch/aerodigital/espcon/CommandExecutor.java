@@ -5,6 +5,7 @@
  */
 package ch.aerodigital.espcon;
 
+import java.io.PrintWriter;
 import jssc.SerialPortEventListener;
 
 /**
@@ -18,5 +19,7 @@ public interface CommandExecutor {
     public void setRestoreEventListener(SerialPortEventListener restoreEventListener);
 
     public void setNextSerialPortEventListener(SerialPortEventListener nextSerialPortEventListener);
+
+    public void setWriter(PrintWriter writer);
 
 }
