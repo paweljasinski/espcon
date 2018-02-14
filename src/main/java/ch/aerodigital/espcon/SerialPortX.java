@@ -19,11 +19,11 @@ public class SerialPortX extends SerialPort {
 
     private SerialPortEventListenerX commonEventListener;
 
-    private Stack<SerialPortEventListenerX> eventListeners;
+    private final Stack<SerialPortEventListenerX> eventListeners;
 
     public SerialPortX(String portName) {
         super(portName);
-        eventListeners = new Stack<SerialPortEventListenerX>();
+        eventListeners = new Stack<>();
     }
 
     public boolean closePortX() {
@@ -72,6 +72,7 @@ public class SerialPortX extends SerialPort {
 
     private class MasterEventListener implements SerialPortEventListener {
 
+        @Override
         public void serialEvent(SerialPortEvent event) {
             boolean processed = false;
             if (!eventListeners.empty()) {

@@ -56,6 +56,7 @@ public class TurboTextFileUploadCommandExecutor extends AbstractCommandExecutor 
         sendBuffer = new ArrayList<byte[]>();
     }
 
+    @Override
     public void start() throws InvalidCommandException {
         // this upload performs implicit dos2unix conversion
         String lua1 = ""

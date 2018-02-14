@@ -16,7 +16,7 @@ import java.util.ArrayList;
 public class Util {
 
     public static ArrayList<String> cmdPrep(String cmd) {
-        ArrayList<String> s256 = new ArrayList<String>();
+        ArrayList<String> s256 = new ArrayList<>();
         int i = 0;
         s256.add("");
         for (String subs : cmd.split("\n")) {
