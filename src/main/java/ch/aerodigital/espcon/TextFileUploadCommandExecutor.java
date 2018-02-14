@@ -48,6 +48,7 @@ public class TextFileUploadCommandExecutor extends AbstractCommandExecutor {
         state = State.IDLE;
     }
 
+    @Override
     public void start() throws InvalidCommandException {
         File srcFile = new File(src);
         try {

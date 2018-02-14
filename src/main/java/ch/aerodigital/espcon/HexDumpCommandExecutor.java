@@ -33,6 +33,7 @@ public class HexDumpCommandExecutor extends AbstractCommandExecutor {
         state = State.IDLE;
     }
 
+    @Override
     public void start() throws InvalidCommandException {
         String cmd = ""
                 + "_dump=function()\n"
