@@ -12,7 +12,7 @@ import jssc.SerialPortEventListener;
  *
  * @author Pawel Jasinski
  */
-public class HexDumpCommandExecutor implements CommandExecutor {
+public class HexDumpCommandExecutor extends AbstractCommandExecutor {
 
     private String filename;
 
@@ -24,9 +24,6 @@ public class HexDumpCommandExecutor implements CommandExecutor {
     private State state;
     private ArrayList<String> sendBuffer;
     private int sendIndex;
-    // required to mark completion and give back the prompt
-    private SerialPortEventListener restoreEventListener;
-    private SerialPortEventListener nextSerialPortEventListener;
 
     public HexDumpCommandExecutor(String command) throws InvalidCommandException {
         String args[] = command.split("\\s+");
@@ -116,7 +113,7 @@ public class HexDumpCommandExecutor implements CommandExecutor {
             dataCollector = dataCollector + serialPort.readStringX(event.getEventValue());
             switch (state) {
                 case IDLE:
-                    System.out.println("unexpected data when in idle: " + dataCollector);
+                    writer.println("unexpected data when in idle: " + dataCollector);
                     break;
                 case LUA_TRANSFER:
                     int startMarkerPos = dataCollector.indexOf("--HexDump start");
@@ -145,7 +142,8 @@ public class HexDumpCommandExecutor implements CommandExecutor {
                         completed();
                         break;
                     }
-                    System.out.print(dataCollector);
+                    writer.print(dataCollector);
+                    writer.flush();
                     dataCollector = "";
                     break;
                 default:
@@ -153,19 +151,4 @@ public class HexDumpCommandExecutor implements CommandExecutor {
             }
         }
     }
-
-    /**
-     * @param restoreEventListener the restoreEventListener to set
-     */
-    public void setRestoreEventListener(SerialPortEventListener restoreEventListener) {
-        this.restoreEventListener = restoreEventListener;
-    }
-
-    /**
-     * @param nextSerialPortEventListener the nextSerialPortEventListener to set
-     */
-    public void setNextSerialPortEventListener(SerialPortEventListener nextSerialPortEventListener) {
-        this.nextSerialPortEventListener = nextSerialPortEventListener;
-    }
-
 }

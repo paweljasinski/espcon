@@ -16,7 +16,7 @@ import jssc.SerialPortEventListener;
  *
  * @author Pawel Jasinski
  */
-public class TextFileUploadCommandExecutor implements CommandExecutor {
+public class TextFileUploadCommandExecutor extends AbstractCommandExecutor {
 
     private String src;
     private String target;
@@ -33,10 +33,6 @@ public class TextFileUploadCommandExecutor implements CommandExecutor {
     private State state;
 
     private BufferedReader srcFileReader;
-
-    // required to mark completion and give back the prompt
-    private SerialPortEventListener restoreEventListener;
-    private SerialPortEventListener nextSerialPortEventListener;
 
     public TextFileUploadCommandExecutor(String command) throws InvalidCommandException {
         String args[] = command.split("\\s+");
@@ -64,7 +60,7 @@ public class TextFileUploadCommandExecutor implements CommandExecutor {
                 + "file.remove('" + target + "') "
                 + "file.open('" + target + "','w+') "
                 + "w=file.writeline\n";
-        // System.out.println(lua);
+        // writer.println(lua);
         serialPort.removeEventListenerX();
         serialPort.addEventListenerX(new SerialPortSink(nextSerialPortEventListener));
         state = State.LUA_TRANSFER;
@@ -87,15 +83,16 @@ public class TextFileUploadCommandExecutor implements CommandExecutor {
         try {
             String line = srcFileReader.readLine();
             if (line == null) {
-                System.out.println(); // after the progress dots
+                writer.println(); // after the progress dots
                 completeTransfer(autoRun);
             } else {
-                //System.out.println("w([==[" + line + "]==]);");
+                //writer.println("w([==[" + line + "]==]);");
                 serialPort.writeStringX("w([==[" + line + "]==]);\n");
-                System.out.print(".");
+                writer.print(".");
+                writer.flush();
             }
         } catch (IOException ex) {
-            System.out.println("unable to read file: " + src);
+            writer.println("unable to read file: " + src);
             completeTransfer(false);
         }
     }
@@ -122,7 +119,7 @@ public class TextFileUploadCommandExecutor implements CommandExecutor {
             int promptPos;
             switch (state) {
                 case IDLE:
-                    System.out.println("unexpected data when in idle: " + dataCollector);
+                    writer.println("unexpected data when in idle: " + dataCollector);
                     break;
                 case LUA_TRANSFER:
                 case FILE_TRANSFER:
@@ -149,7 +146,7 @@ public class TextFileUploadCommandExecutor implements CommandExecutor {
                         serialPort.addEventListenerX(restoreEventListener);
                         serialPort.writeStringX("\n");
                     }
-                    System.out.print(dataCollector);
+                    writer.print(dataCollector);
                     dataCollector = "";
                     break;
 
@@ -160,23 +157,10 @@ public class TextFileUploadCommandExecutor implements CommandExecutor {
     }
 
     /**
-     * @param restoreEventListener the restoreEventListener to set
-     */
-    public void setRestoreEventListener(SerialPortEventListener restoreEventListener) {
-        this.restoreEventListener = restoreEventListener;
-    }
-
-    /**
-     * @param nextSerialPortEventListener the nextSerialPortEventListener to set
-     */
-    public void setNextSerialPortEventListener(SerialPortEventListener nextSerialPortEventListener) {
-        this.nextSerialPortEventListener = nextSerialPortEventListener;
-    }
-
-    /**
      * @param autoRun the autoRun to set
      */
     public void setAutoRun(boolean autoRun) {
         this.autoRun = autoRun;
     }
+
 }

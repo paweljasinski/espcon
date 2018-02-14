@@ -19,7 +19,7 @@ import jssc.SerialPortEventListener;
  *
  * @author Pawel Jasinski
  */
-public class FileUploadCommandExecutor implements CommandExecutor {
+public class FileUploadCommandExecutor extends AbstractCommandExecutor {
 
     private String src;
     private String target;
@@ -46,10 +46,6 @@ public class FileUploadCommandExecutor implements CommandExecutor {
     private long totalPackets;
     private long regularPacketSize;
 
-    // required to mark completion and give back the prompt
-    private SerialPortEventListener restoreEventListener;
-    private SerialPortEventListener nextSerialPortEventListener;
-
     public FileUploadCommandExecutor(String command) throws InvalidCommandException {
         String args[] = command.split("\\s+");
         if (args.length == 1 || args.length > 3) {
@@ -65,6 +61,8 @@ public class FileUploadCommandExecutor implements CommandExecutor {
         fileReadBuffer = new byte[FILE_UPLOAD_PACKET_SIZE];
         state = State.IDLE;
     }
+
+
 
     public void start() throws InvalidCommandException {
         File srcFile = new File(src);
@@ -128,13 +126,13 @@ public class FileUploadCommandExecutor implements CommandExecutor {
                 }
                 serialPort.writeBytesX(currentChunk);
             } catch (IOException ex) {
-                System.out.println("failed to read file chunk" + ex);
+                writer.println("failed to read file chunk" + ex);
             }
         } else {
             try {
                 srcFileIs.close();
             } catch (IOException ex) {
-                System.out.println("error when closing input " + ex);
+                writer.println("error when closing input " + ex);
             }
             state = State.END;
         }
@@ -163,7 +161,7 @@ public class FileUploadCommandExecutor implements CommandExecutor {
             int promptPos;
             switch (state) {
                 case IDLE:
-                    System.out.println("unexpected data when in idle: " + dataCollector);
+                    writer.println("unexpected data when in idle: " + dataCollector);
                     break;
                 case LUA_TRANSFER:
                     promptPos = dataCollector.indexOf("> ");
@@ -180,7 +178,8 @@ public class FileUploadCommandExecutor implements CommandExecutor {
                         dataCollector = dataCollector.substring(crcEndMarkerPos + 13);
                         int receivedCrc = Integer.parseInt(crcString);
                         int expectedCrc = Util.CRC(currentChunk);
-                        System.out.print(expectedCrc == receivedCrc ? "." : "e");
+                        writer.print(expectedCrc == receivedCrc ? "." : "e");
+                        writer.flush();
                         sendNextPacket();
                     }
                     break;
@@ -195,7 +194,7 @@ public class FileUploadCommandExecutor implements CommandExecutor {
                 case WAIT_FINAL_PROMPT:
                     promptPos = dataCollector.indexOf("> ");
                     if (-1 != promptPos) {
-                        System.out.println(); // after progress dots
+                        writer.println(); // after writer dots
                         serialPort.removeEventListenerX();
                         serialPort.addEventListenerX(restoreEventListener);
                         serialPort.writeStringX("\n");
@@ -205,20 +204,6 @@ public class FileUploadCommandExecutor implements CommandExecutor {
                     break;
             }
         }
-    }
-
-    /**
-     * @param restoreEventListener the restoreEventListener to set
-     */
-    public void setRestoreEventListener(SerialPortEventListener restoreEventListener) {
-        this.restoreEventListener = restoreEventListener;
-    }
-
-    /**
-     * @param nextSerialPortEventListener the nextSerialPortEventListener to set
-     */
-    public void setNextSerialPortEventListener(SerialPortEventListener nextSerialPortEventListener) {
-        this.nextSerialPortEventListener = nextSerialPortEventListener;
     }
 
 }

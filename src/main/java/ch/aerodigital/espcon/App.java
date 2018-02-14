@@ -1,9 +1,24 @@
 package ch.aerodigital.espcon;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CoderResult;
+import java.nio.charset.CodingErrorAction;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import jssc.SerialPort;
 import jssc.SerialPortEvent;
 import jssc.SerialPortEventListener;
@@ -16,14 +31,27 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.jline.builtins.ScreenTerminal;
+import org.jline.keymap.BindingReader;
+import org.jline.keymap.KeyMap;
+import static org.jline.keymap.KeyMap.key;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.History;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.jline.reader.UserInterruptException;
 import org.jline.reader.impl.history.DefaultHistory;
+import org.jline.terminal.Attributes;
+import org.jline.terminal.MouseEvent;
+import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
+import org.jline.terminal.impl.LineDisciplineTerminal;
+import org.jline.utils.AttributedString;
+import org.jline.utils.AttributedStringBuilder;
+import org.jline.utils.Display;
+import org.jline.utils.InfoCmp;
+import org.jline.utils.Log;
 
 /**
  *
@@ -37,7 +65,7 @@ public class App {
     public static int echo = 0;
     public static boolean autorun = true;
 
-    private Terminal terminal;
+    private Terminal systemTerminal;
     private History history;
     private LineReader reader;
 
@@ -108,24 +136,298 @@ public class App {
 
         try {
             App app = new App();
-            app.run();
+            app.prepareVirtualTerminal();
         } catch (IOException ex) {
             System.out.println(ex);
         }
+    }
+
+    enum Binding {
+        Discard, SelfInsert, Mouse
+    }
+
+    protected KeyMap<Object> createEmptyKeyMap(String prefix) {
+        KeyMap<Object> keyMap = new KeyMap<>();
+        keyMap.setUnicode(Binding.SelfInsert);
+        keyMap.setNomatch(Binding.SelfInsert);
+        for (int i = 0; i < 255; i++) {
+            keyMap.bind(Binding.Discard, prefix + (char) (i));
+        }
+        keyMap.bind(Binding.Mouse, key(systemTerminal, InfoCmp.Capability.key_mouse));
+        return keyMap;
     }
 
     public App() {
         commonSerialEventSink = new CommonSerialPortEventSink();
         portReader = new InteractiveSerialPortSink(commonSerialEventSink);
         state = State.DISCONNECTED;
+        try {
+            systemTerminal = TerminalBuilder.builder().system(true).build();
+        } catch (IOException ex) {
+            System.out.println("failed to create terminal object " + ex.getMessage());
+        }
+        display = new Display(systemTerminal, true);
+        size.copy(systemTerminal.getSize());
+        keyMap = createEmptyKeyMap("`");
     }
 
-    public void run() throws IOException {
-        terminal = TerminalBuilder.builder().system(true).build();
-        history = new DefaultHistory();
-        reader = LineReaderBuilder.builder().terminal(terminal).history(history).build();
-        reader.setVariable(LineReader.HISTORY_FILE, ".cmd-history");
+    private LineDisciplineTerminal console;
 
+    private ScheduledExecutorService executor;
+
+    private ScreenTerminal screenTerminal;
+
+    private String term; // terminal type of the screen terminal
+
+    private final AtomicBoolean running = new AtomicBoolean(true);
+
+    private final AtomicBoolean dirty = new AtomicBoolean(true);
+    private final AtomicBoolean resized = new AtomicBoolean(true);
+
+    private KeyMap<Object> keyMap;
+
+    private final Display display;
+    private final Size size = new Size(); // this is system terminal size
+    // private final screenSize; // this is one row less than system terminal
+
+    private void resize(Terminal.Signal signal) {
+        resized.set(true);
+        setDirty();
+    }
+
+    private void setDirty() {
+        synchronized (dirty) {
+            dirty.set(true);
+            dirty.notifyAll();
+        }
+    }
+
+    private void interrupt(Terminal.Signal signal) {
+        console.raise(signal);
+    }
+
+    private void suspend(Terminal.Signal signal) {
+        console.raise(signal);
+    }
+
+    private OutputStream masterOutput;
+    private OutputStream masterInputOutput;
+
+
+    private class MasterOutputStream extends OutputStream {
+
+        private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        private final CharsetDecoder decoder = Charset.defaultCharset().newDecoder()
+                .onMalformedInput(CodingErrorAction.REPLACE)
+                .onUnmappableCharacter(CodingErrorAction.REPLACE);
+
+        @Override
+        public synchronized void write(int b) {
+            buffer.write(b);
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+            buffer.write(b, off, len);
+        }
+
+        @Override
+        public synchronized void flush() throws IOException {
+            int size = buffer.size();
+            if (size > 0) {
+                CharBuffer out;
+                for (;;) {
+                    out = CharBuffer.allocate(size);
+                    ByteBuffer in = ByteBuffer.wrap(buffer.toByteArray());
+                    CoderResult result = decoder.decode(in, out, false);
+                    if (result.isOverflow()) {
+                        size *= 2;
+                    } else {
+                        buffer.reset();
+                        buffer.write(in.array(), in.arrayOffset(), in.remaining());
+                        break;
+                    }
+                }
+                if (out.position() > 0) {
+                    out.flip();
+                    screenTerminal.write(out);
+                    masterInputOutput.write(screenTerminal.read().getBytes());
+                }
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
+            flush();
+        }
+    }
+
+    private void prepareVirtualTerminal() throws IOException {
+        history = new DefaultHistory();
+
+        //Attributes attrs = systemTerminal.getAttributes();
+        Terminal.SignalHandler prevWinchHandler = systemTerminal.handle(Terminal.Signal.WINCH, this::resize);
+        Terminal.SignalHandler prevIntHandler = systemTerminal.handle(Terminal.Signal.INT, this::interrupt);
+        Terminal.SignalHandler prevSuspHandler = systemTerminal.handle(Terminal.Signal.TSTP, this::suspend);
+        Attributes attributes = systemTerminal.enterRawMode();
+        systemTerminal.puts(InfoCmp.Capability.enter_ca_mode);
+        systemTerminal.puts(InfoCmp.Capability.keypad_xmit);
+        systemTerminal.trackMouse(Terminal.MouseTracking.Any);
+        systemTerminal.flush();
+        executor = Executors.newSingleThreadScheduledExecutor();
+        try {
+            screenTerminal = new ScreenTerminal(size.getColumns(), size.getRows() - 1) {
+                @Override
+                protected void setDirty() {
+                    super.setDirty();
+                    App.this.setDirty();
+                }
+            };
+            masterOutput = new MasterOutputStream();
+            masterInputOutput = new OutputStream() {
+                @Override
+                public void write(int b) throws IOException {
+                    console.processInputByte(b);
+                }
+            };
+            Integer colors = systemTerminal.getNumericCapability(InfoCmp.Capability.max_colors);
+            term = (colors != null && colors >= 256) ? "screen-256color" : "screen";
+            this.console = new LineDisciplineTerminal("espcon", term, masterOutput, null) {
+                @Override
+                public void close() throws IOException {
+                    super.close();
+                    // closer.accept(Tmux.VirtualConsole.this);
+                }
+            };
+            this.console.setSize(new Size(size.getColumns(), size.getRows() - 2));
+            console.setAttributes(systemTerminal.getAttributes());
+            new Thread(this::serialrun, "Interactive").start();
+            new Thread(this::inputLoop, "Mux input loop").start();
+            // Redraw loop
+            redrawLoop();
+        } catch (RuntimeException e) {
+            throw e;
+        } finally {
+            executor.shutdown();
+            systemTerminal.trackMouse(Terminal.MouseTracking.Off);
+            systemTerminal.puts(InfoCmp.Capability.keypad_local);
+            systemTerminal.puts(InfoCmp.Capability.exit_ca_mode);
+            systemTerminal.flush();
+            systemTerminal.setAttributes(attributes);
+            systemTerminal.handle(Terminal.Signal.WINCH, prevWinchHandler);
+            systemTerminal.handle(Terminal.Signal.INT, prevIntHandler);
+            systemTerminal.handle(Terminal.Signal.TSTP, prevSuspHandler);
+        }
+    }
+
+    private void inputLoop() {
+        try {
+            BindingReader keyboardreader = new BindingReader(systemTerminal.reader());
+            boolean first = true;
+            while (running.get()) {
+                Object b;
+                if (first) {
+                    b = keyboardreader.readBinding(keyMap);
+                } else if (keyboardreader.peekCharacter(100) >= 0) {
+                    b = keyboardreader.readBinding(keyMap, null, false);
+                } else {
+                    b = null;
+                }
+                if (b == Binding.SelfInsert) {
+                    masterInputOutput.write(keyboardreader.getLastBinding().getBytes());
+                    first = false;
+                } else {
+                    if (first) {
+                        first = false;
+                    } else {
+                        masterInputOutput.flush();
+                        first = true;
+                    }
+                    if (b == Binding.Mouse) {
+                        MouseEvent event = systemTerminal.readMouseEvent();
+                        // System.err.println(event.toString());
+                    } else if (b instanceof String || b instanceof String[]) {
+                        ByteArrayOutputStream out = new ByteArrayOutputStream();
+                        ByteArrayOutputStream err = new ByteArrayOutputStream();
+                        try (PrintStream pout = new PrintStream(out);
+                                PrintStream perr = new PrintStream(err)) {
+                            if (b instanceof String) {
+                                execute(pout, perr, (String) b);
+                            } else {
+                                execute(pout, perr, Arrays.asList((String[]) b));
+                            }
+                        } catch (Exception e) {
+                            // TODO: log
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            if (running.get()) {
+                Log.info("Error in input loop", e);
+            }
+        } finally {
+            running.set(false);
+            setDirty();
+        }
+    }
+
+    private void redrawLoop() {
+        while (running.get()) {
+            try {
+                synchronized (dirty) {
+                    while (running.get() && !dirty.compareAndSet(true, false)) {
+                        dirty.wait();
+                    }
+                }
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            handleResize();
+            long[] screen = new long[size.getRows() * size.getColumns()];
+            // Fill
+            Arrays.fill(screen, 0x00000020L);
+            int[] cursor = new int[2];
+
+            // redraw();
+            screenTerminal.dump(screen, 0, 0, size.getRows()-1, size.getColumns(), cursor);
+            List<AttributedString> lines = new ArrayList<>();
+            for (int y = 0; y < size.getRows(); y++) {
+                AttributedStringBuilder sb = new AttributedStringBuilder(size.getColumns());
+                for (int x = 0; x < size.getColumns(); x++) {
+                    long d = screen[y * size.getColumns() + x];
+                    int c = (int) (d & 0xffffffffL);
+                    sb.append((char) c);
+                }
+                lines.add(sb.toAttributedString());
+            }
+            display.resize(size.getRows(), size.getColumns());
+            display.update(lines, size.cursorPos(cursor[1], cursor[0]));
+        }
+    }
+
+    private void handleResize() {
+        // Re-compute the layout
+        if (resized.compareAndSet(true, false)) {
+            size.copy(systemTerminal.getSize());
+            screenTerminal.setSize(size.getColumns(), size.getRows() - 1);
+            console.setSize(new Size(size.getColumns(), size.getRows() - 1));
+            // may have to clear display here
+        }
+    }
+
+    private void execute(PrintStream pout, PrintStream perr, String cmd) {
+        pout.println("about to execute: " + cmd);
+    }
+
+    private void execute(PrintStream pout, PrintStream perr, List<String> b) {
+        pout.println("not sure what to expect: " + String.join("", b));
+    }
+
+    public void serialrun() {
+        reader = LineReaderBuilder.builder().terminal(console).history(history).build();
+        reader.setOpt(LineReader.Option.AUTO_FRESH_LINE);
+        reader.setVariable(LineReader.HISTORY_FILE, ".cmd-history");
         boolean terminate = false;
         while (!terminate) {
             try {
@@ -133,13 +435,13 @@ public class App {
                 state = State.SYNC;
                 terminate = repl();
             } catch (SerialPortException ex) {
-                System.out.println(ex);
+                console.writer().println(ex);
                 reader.readLine("press ENTER to try again ... ");
             } catch (EndOfFileException ex) {
                 try {
                     serialPort.closePort();
                 } catch (SerialPortException ex2) {
-                    System.out.println("troulbe closing serial port " + ex2);
+                    System.out.println("trouble closing serial port " + ex2);
                 }
                 break;
             }
@@ -158,7 +460,7 @@ public class App {
                     lastNotNull = prompt;
                 }
             } catch (InterruptedException ex) {
-                System.out.println("Interrupted in poll: " + ex);
+                console.writer().println("Interrupted in poll: " + ex);
             }
             long elapsed = System.currentTimeMillis() - start;
             remainder = timeout - elapsed;
@@ -171,7 +473,7 @@ public class App {
         try {
             prompt = (String) promptQueue.poll(timeout, TimeUnit.MILLISECONDS);
         } catch (InterruptedException ex) {
-            System.out.println("interrupted " + ex);
+            console.writer().println("interrupted " + ex);
         }
         String drainPrompt = timedDrain(drainPeriod);
         return drainPrompt != null ? drainPrompt : prompt;
@@ -189,7 +491,7 @@ public class App {
                 continue;
             }
             if (prompt.equals(">> ")) {
-                System.out.println("aborting >> prompt");
+                console.writer().println("aborting >> prompt");
                 serialPort.writeStringX("x\n");
                 prompt = timedDrain(200);
                 if (prompt.equals("> ")) {
@@ -212,7 +514,7 @@ public class App {
                     try {
                         processCommand(line);
                     } catch (InvalidCommandException ex) {
-                        System.out.println(ex.getMessage());
+                        console.writer().println(ex.getMessage());
                         continue; // reuse prompt
                     }
                 } else {
@@ -222,7 +524,7 @@ public class App {
             } catch (UserInterruptException e) {
                 // can do someting good here
             } catch (SerialPortXException ex) {
-                System.out.println("serial exception: " + ex);
+                console.writer().println("serial exception: " + ex);
                 // let the  outer loop engage in reopen
                 return false;
             }
@@ -284,7 +586,7 @@ public class App {
                     if (line.equals(MARKER)) {
                         state = State.REPL;
                     } else {
-                        System.out.println(line);
+                        console.writer().println(line);
                     }
                 }
             }
@@ -302,7 +604,7 @@ public class App {
                     try {
                         promptQueue.put(line);
                     } catch (InterruptedException ex) {
-                        System.out.println("interrupter in put");
+                        console.writer().println("interrupter in put");
                     }
                 }
                 lineBuffer.setLength(0);
@@ -335,17 +637,20 @@ public class App {
             processCatCommand(command);
         } else if (command.startsWith("--upload")) {
             FileUploadCommandExecutor ce = new FileUploadCommandExecutor(command);
+            ce.setWriter(console.writer());
             ce.setRestoreEventListener(portReader);
             ce.setNextSerialPortEventListener(commonSerialEventSink);
             ce.start();
         } else if (command.startsWith("--save")) {
             TextFileUploadCommandExecutor ce = new TextFileUploadCommandExecutor(command);
+            ce.setWriter(console.writer());
             ce.setRestoreEventListener(portReader);
             ce.setNextSerialPortEventListener(commonSerialEventSink);
             ce.setAutoRun(autorun);
             ce.start();
         } else if (command.startsWith("--tsave")) {
             TurboTextFileUploadCommandExecutor ce = new TurboTextFileUploadCommandExecutor(command);
+            ce.setWriter(console.writer());
             ce.setRestoreEventListener(portReader);
             ce.setNextSerialPortEventListener(commonSerialEventSink);
             ce.setAutoRun(autorun);
@@ -404,12 +709,13 @@ public class App {
         try {
             promptQueue.put("> ");
         } catch (InterruptedException ex) {
-            System.out.println("interrupter in put");
+            console.writer().println("interrupter in put");
         }
     }
 
     private void processHexDumpCommand(String command) throws InvalidCommandException {
         HexDumpCommandExecutor ce = new HexDumpCommandExecutor(command);
+        ce.setWriter(console.writer());
         ce.setRestoreEventListener(portReader);
         ce.setNextSerialPortEventListener(commonSerialEventSink);
         ce.start();
@@ -444,10 +750,10 @@ public class App {
             try {
                 serialPort.closePort();
             } catch (SerialPortException ex) {
-                System.out.println("exception when closing serial port: " + ex);
+                console.writer().println("exception when closing serial port: " + ex);
             }
         }
-        System.out.println("About to open port " + serialPortDevice + ", baud " + baud + ", 8N1");
+        console.writer().println("About to open port " + serialPortDevice + ", baud " + baud + ", 8N1");
         serialPort = new SerialPortX(serialPortDevice);
         serialPort.openPort();
         serialPort.setParams(baud, SerialPort.DATABITS_8,
@@ -460,11 +766,11 @@ public class App {
 
     private void dump(String p, String s) {
         if (false) {
-            System.out.print(p + " ");
+            console.writer().print(p + " ");
             for (int i = 0; i < s.length(); i++) {
-                System.out.print(String.format("%02X ", (int) s.charAt(i)));
+                console.writer().print(String.format("%02X ", (int) s.charAt(i)));
             }
-            System.out.println();
+            console.writer().println();
         }
     }
 }
