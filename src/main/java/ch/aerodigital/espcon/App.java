@@ -136,6 +136,7 @@ public class App {
         } catch (IOException ex) {
             System.out.println(ex);
         }
+        System.exit(0);
     }
 
     enum Binding {
@@ -258,8 +259,6 @@ public class App {
 
     private void prepareVirtualTerminal() throws IOException {
         history = new DefaultHistory();
-
-        //Attributes attrs = systemTerminal.getAttributes();
         Terminal.SignalHandler prevWinchHandler = systemTerminal.handle(Terminal.Signal.WINCH, this::resize);
         Terminal.SignalHandler prevIntHandler = systemTerminal.handle(Terminal.Signal.INT, this::interrupt);
         Terminal.SignalHandler prevSuspHandler = systemTerminal.handle(Terminal.Signal.TSTP, this::suspend);
@@ -293,7 +292,7 @@ public class App {
                     // closer.accept(Tmux.VirtualConsole.this);
                 }
             };
-            this.console.setSize(new Size(size.getColumns(), size.getRows() - 2));
+            this.console.setSize(new Size(size.getColumns(), size.getRows() - 1));
             console.setAttributes(systemTerminal.getAttributes());
             new Thread(this::serialrun, "Interactive").start();
             new Thread(this::inputLoop, "Mux input loop").start();
@@ -388,6 +387,7 @@ public class App {
             List<AttributedString> lines = new ArrayList<>();
             for (int y = 0; y < size.getRows(); y++) {
                 AttributedStringBuilder sb = new AttributedStringBuilder(size.getColumns());
+                // TODO: bring back colors/bold etc.
                 for (int x = 0; x < size.getColumns(); x++) {
                     long d = screen[y * size.getColumns() + x];
                     int c = (int) (d & 0xffffffffL);
@@ -434,6 +434,8 @@ public class App {
             } catch (EndOfFileException ex) {
                 try {
                     serialPort.closePort();
+                    running.set(false);
+                    setDirty();
                 } catch (SerialPortException ex2) {
                     System.out.println("trouble closing serial port " + ex2);
                 }
