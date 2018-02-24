@@ -101,7 +101,7 @@ public class TurboTextFileUploadCommandExecutor extends AbstractCommandExecutor 
             int read;
             while (-1 != (read = srcFileIs.read(fileReadBuffer, 0, fileReadBuffer.length - 1))) {
                 fileReadBuffer[read] = '\r';
-                sendBuffer.add(Arrays.copyOfRange(fileReadBuffer, 0, read));
+                sendBuffer.add(Arrays.copyOfRange(fileReadBuffer, 0, read + 1));
             }
             sendBuffer.add("~~~esp~eof~~~\r".getBytes());
         } catch (IOException ex) {
