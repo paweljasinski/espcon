@@ -265,7 +265,8 @@ public class App {
         Attributes attributes = systemTerminal.enterRawMode();
         systemTerminal.puts(InfoCmp.Capability.enter_ca_mode);
         systemTerminal.puts(InfoCmp.Capability.keypad_xmit);
-        systemTerminal.trackMouse(Terminal.MouseTracking.Any);
+        // keep mouse as-is for copy/paste of xterm
+        // systemTerminal.trackMouse(Terminal.MouseTracking.Any);
         systemTerminal.flush();
         executor = Executors.newSingleThreadScheduledExecutor();
         try {
@@ -302,7 +303,7 @@ public class App {
             throw e;
         } finally {
             executor.shutdown();
-            systemTerminal.trackMouse(Terminal.MouseTracking.Off);
+            // systemTerminal.trackMouse(Terminal.MouseTracking.Off);
             systemTerminal.puts(InfoCmp.Capability.keypad_local);
             systemTerminal.puts(InfoCmp.Capability.exit_ca_mode);
             systemTerminal.flush();
