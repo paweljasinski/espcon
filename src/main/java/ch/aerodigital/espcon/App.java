@@ -58,7 +58,7 @@ import org.jline.utils.Log;
  */
 public class App {
 
-    private static String serialPortDevice = null;
+    private static String serialPortDevice = "/dev/ttyS0";
     public static int baud = 230400;
     public static SerialPortX serialPort;
     public static int echo = 0;
@@ -86,7 +86,7 @@ public class App {
         options.addOption("h", "help", false, "print help message and exit");
         options.addOption("v", "verbose", false, "be extra verbose");
         options.addOption("d", "debug", false, "print debugging information");
-        options.addOption("p", "port", true, "serial port device");
+        options.addOption("p", "port", true, "serial port device, default /dev/ttyS0");
         options.addOption("l", "list", false, "list available serial ports");
         options.addOption(Option.builder("b")
                 .desc("serial port baud rate, default = " + baud)
@@ -125,6 +125,11 @@ public class App {
                 } catch (NumberFormatException ex) {
                     System.out.println("Unable to interpret baud argument: " + baudAsString);
                 }
+            }
+            String [] remaining = line.getArgs();
+            if (remaining.length != 0) {
+                System.err.println("Unexpected argument(s): " + String.join(",", remaining));
+                System.exit(1);
             }
         } catch (ParseException exp) {
             System.out.println("Unexpected exception:" + exp.getMessage());
