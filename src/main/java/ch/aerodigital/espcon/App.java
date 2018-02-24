@@ -586,7 +586,7 @@ public class App {
                     try {
                         promptQueue.put(line);
                     } catch (InterruptedException ex) {
-                        console.writer().println("interrupter in put");
+                        console.writer().println("interrupted in put");
                     }
                 }
                 lineBuffer.setLength(0);
