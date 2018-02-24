@@ -59,7 +59,7 @@
   <configuration>
     <archive>
       <manifest>
-        <mainClass>fully.qualified.MainClass</mainClass>
+        <mainClass>ch.aerodigital.espcon.App</mainClass>
       </manifest>
     </archive>
     <descriptorRefs>
