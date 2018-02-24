@@ -16,6 +16,10 @@ public abstract class AbstractCommandExecutor implements CommandExecutor {
     // all user info goes into writer
     protected PrintWriter writer;
 
+    /**
+     *
+     * @param writer
+     */
     @Override
     public void setWriter(PrintWriter writer) {
         this.writer = writer;

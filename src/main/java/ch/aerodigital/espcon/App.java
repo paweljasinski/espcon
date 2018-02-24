@@ -643,12 +643,15 @@ public class App {
         if (args.length != 2) {
             throw new InvalidCommandException("echo expects exactly one argument");
         }
-        if (args[1].equals("off")) {
-            val = 0;
-        } else if (args[1].equals("on")) {
-            val = 1;
-        } else {
-            throw new InvalidCommandException("argument of --echo can be either on or off");
+        switch (args[1]) {
+            case "off":
+                val = 0;
+                break;
+            case "on":
+                val = 1;
+                break;
+            default:
+                throw new InvalidCommandException("argument of --echo can be either on or off");
         }
         serialPort.writeStringX("uart.setup(0," + baud + ",8, 0, 1, " + val + ")\n");
         echo = val;
@@ -715,6 +718,7 @@ public class App {
 
     private class CommonEventListener implements SerialPortEventListenerX {
 
+        @Override
         public boolean serialEvent(SerialPortEvent event) {
 
             if (event.isBREAK()) {

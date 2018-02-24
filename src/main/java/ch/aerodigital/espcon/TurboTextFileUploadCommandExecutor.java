@@ -53,7 +53,7 @@ public class TurboTextFileUploadCommandExecutor extends AbstractCommandExecutor 
             target = args[2];
         }
         state = State.IDLE;
-        sendBuffer = new ArrayList<byte[]>();
+        sendBuffer = new ArrayList<>();
     }
 
     @Override
