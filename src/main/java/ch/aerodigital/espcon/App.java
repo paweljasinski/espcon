@@ -142,7 +142,7 @@ public class App {
         Discard, SelfInsert, Mouse
     }
 
-    protected KeyMap<Object> createEmptyKeyMap(String prefix) {
+    private KeyMap<Object> createEmptyKeyMap(String prefix) {
         KeyMap<Object> keyMap = new KeyMap<>();
         keyMap.setUnicode(Binding.SelfInsert);
         keyMap.setNomatch(Binding.SelfInsert);
@@ -162,7 +162,7 @@ public class App {
         }
         display = new Display(systemTerminal, true);
         size.copy(systemTerminal.getSize());
-        keyMap = createEmptyKeyMap("`");
+        appKeyMap = createEmptyKeyMap("`");
     }
 
     private LineDisciplineTerminal console;
@@ -178,7 +178,7 @@ public class App {
     private final AtomicBoolean dirty = new AtomicBoolean(true);
     private final AtomicBoolean resized = new AtomicBoolean(true);
 
-    private KeyMap<Object> keyMap;
+    private final KeyMap<Object> appKeyMap;
 
     private final Display display;
     private final Size size = new Size(); // this is system terminal size
@@ -321,9 +321,9 @@ public class App {
             while (running.get()) {
                 Object b;
                 if (first) {
-                    b = keyboardreader.readBinding(keyMap);
+                    b = keyboardreader.readBinding(appKeyMap);
                 } else if (keyboardreader.peekCharacter(100) >= 0) {
-                    b = keyboardreader.readBinding(keyMap, null, false);
+                    b = keyboardreader.readBinding(appKeyMap, null, false);
                 } else {
                     b = null;
                 }
@@ -474,7 +474,7 @@ public class App {
     }
 
     private boolean repl() {
-        String prompt = "";
+        String prompt;
         while (state == State.SYNC) {
             String line;
             prompt = "press ENTER to sync ... ";
@@ -529,6 +529,7 @@ public class App {
 
         private final StringBuilder lineBuffer = new StringBuilder(1024);
 
+        @Override
         public boolean serialEvent(SerialPortEvent event) {
             if (!event.isRXCHAR() || event.getEventValue() <= 0) {
                 return false;
@@ -598,7 +599,6 @@ public class App {
         } else if (command.equals("--ls")) {
             processLsCommand(command);
         } else if (command.startsWith("--cat")) {
-            String args[] = command.split("\\s+");
             processCatCommand(command);
         } else if (command.startsWith("--upload")) {
             FileUploadCommandExecutor ce = new FileUploadCommandExecutor(command);
