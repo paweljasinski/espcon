@@ -128,3 +128,6 @@ $RECYCLE.BIN/
 
 # Project specific
 .cmd-history
+
+# copy of the release files
+release
