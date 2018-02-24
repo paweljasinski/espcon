@@ -424,28 +424,42 @@ public class App {
         pout.println("not sure what to expect: " + String.join("", b));
     }
 
+    private void terminate() {
+        try {
+            serialPort.closePort();
+            running.set(false);
+            setDirty();
+        } catch (SerialPortException ex2) {
+            System.out.println("trouble closing serial port " + ex2);
+        }
+    }
+
     public void serialrun() {
         reader = LineReaderBuilder.builder().terminal(console).history(history).build();
         reader.setOpt(LineReader.Option.AUTO_FRESH_LINE);
         reader.setVariable(LineReader.HISTORY_FILE, ".cmd-history");
-        boolean terminate = false;
-        while (!terminate) {
+        while (true) {
             try {
                 openPort();
                 state = State.SYNC;
-                terminate = repl();
+                repl();
             } catch (SerialPortXException ex) {
-                console.writer().println(ex);
-                reader.readLine("press ENTER to try again ... ");
-            } catch (EndOfFileException ex) {
+                // disconnected device
                 try {
-                    serialPort.closePort();
+                    console.writer().println(ex.getMessage());
+                    reader.readLine("press ENTER to try again ... ");
+                } catch (UserInterruptException ue) {
+                    // ^C when in open/reopen loop
                     running.set(false);
                     setDirty();
-                } catch (SerialPortException ex2) {
-                    System.out.println("trouble closing serial port " + ex2);
+                    break;
                 }
+            } catch (EndOfFileException ex) {
+                // either ^D or --quit
+                terminate();
                 break;
+            } catch (Throwable ex) {
+                console.writer().println("ex:"  + ex);
             }
         }
     }
@@ -481,7 +495,7 @@ public class App {
         return drainPrompt != null ? drainPrompt : prompt;
     }
 
-    private boolean repl() {
+    private void repl() {
         String prompt;
         while (state == State.SYNC) {
             String line;
@@ -525,10 +539,6 @@ public class App {
                 prompt = waitForPrompt(2000, 25);
             } catch (UserInterruptException e) {
                 // can do someting good here
-            } catch (SerialPortXException ex) {
-                console.writer().println("serial exception: " + ex);
-                // let the  outer loop engage in reopen
-                return false;
             }
         }
     }
