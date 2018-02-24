@@ -568,6 +568,7 @@ public class App {
                         state = State.REPL;
                     } else {
                         console.writer().println(line);
+                        console.flush();
                     }
                 }
             }
