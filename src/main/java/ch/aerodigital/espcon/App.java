@@ -425,6 +425,7 @@ public class App {
     private void handleResize() {
         // Re-compute the layout
         if (resized.compareAndSet(true, false)) {
+            screenTerminal.historyScrollTerminate();
             size.copy(systemTerminal.getSize());
             screenTerminal.setSize(size.getColumns(), size.getRows() - 1);
             console.setSize(new Size(size.getColumns(), size.getRows() - 1));
