@@ -131,7 +131,7 @@ public class App {
                     System.out.println("Unable to interpret baud argument: " + baudAsString);
                 }
             }
-            String [] remaining = line.getArgs();
+            String[] remaining = line.getArgs();
             if (remaining.length != 0) {
                 System.err.println("Unexpected argument(s): " + String.join(",", remaining));
                 System.exit(1);
@@ -218,7 +218,6 @@ public class App {
 
     private OutputStream masterOutput;
     private OutputStream masterInputOutput;
-
 
     private class MasterOutputStream extends OutputStream {
 
@@ -338,7 +337,7 @@ public class App {
                 } else {
                     b = null;
                 }
-                //System.out.println("f:" + first + " b:" + b);
+                // System.out.println("f:" + first + " b:" + b);
                 if (b == BindingEnum.SelfInsert) {
                     screenTerminal.historyScrollTerminate();
                     masterInputOutput.write(keyboardreader.getLastBinding().getBytes());
@@ -399,7 +398,7 @@ public class App {
             int[] cursor = new int[2];
 
             // redraw();
-            screenTerminal.dump(screen, 0, 0, size.getRows()-1, size.getColumns(), cursor);
+            screenTerminal.dump(screen, 0, 0, size.getRows() - 1, size.getColumns(), cursor);
             List<AttributedString> lines = new ArrayList<>();
             for (int y = 0; y < size.getRows(); y++) {
                 AttributedStringBuilder sb = new AttributedStringBuilder(size.getColumns());
