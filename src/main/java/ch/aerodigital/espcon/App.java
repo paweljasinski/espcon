@@ -340,6 +340,7 @@ public class App {
                 }
                 //System.out.println("f:" + first + " b:" + b);
                 if (b == BindingEnum.SelfInsert) {
+                    screenTerminal.historyScrollTerminate();
                     masterInputOutput.write(keyboardreader.getLastBinding().getBytes());
                     first = false;
                 } else {
