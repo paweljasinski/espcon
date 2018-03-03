@@ -33,11 +33,15 @@ import org.apache.commons.cli.ParseException;
 import org.jline.builtins.ScreenTerminal;
 import org.jline.keymap.BindingReader;
 import org.jline.keymap.KeyMap;
+import static org.jline.keymap.KeyMap.alt;
 import static org.jline.keymap.KeyMap.key;
+import static org.jline.keymap.KeyMap.translate;
+import org.jline.reader.Binding;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.History;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
+import org.jline.reader.Reference;
 import org.jline.reader.UserInterruptException;
 import org.jline.reader.impl.history.DefaultHistory;
 import org.jline.terminal.Attributes;
@@ -50,6 +54,7 @@ import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.Display;
 import org.jline.utils.InfoCmp;
+import org.jline.utils.InfoCmp.Capability;
 import org.jline.utils.Log;
 
 /**
@@ -144,18 +149,15 @@ public class App {
         System.exit(0);
     }
 
-    enum Binding {
+    enum BindingEnum {
         Discard, SelfInsert, Mouse
     }
 
-    private KeyMap<Object> createEmptyKeyMap(String prefix) {
+    private KeyMap<Object> createEmptyKeyMap() {
         KeyMap<Object> keyMap = new KeyMap<>();
-        keyMap.setUnicode(Binding.SelfInsert);
-        keyMap.setNomatch(Binding.SelfInsert);
-        for (int i = 0; i < 255; i++) {
-            keyMap.bind(Binding.Discard, prefix + (char) (i));
-        }
-        keyMap.bind(Binding.Mouse, key(systemTerminal, InfoCmp.Capability.key_mouse));
+        keyMap.setUnicode(BindingEnum.SelfInsert);
+        keyMap.setNomatch(BindingEnum.SelfInsert);
+        keyMap.bind(BindingEnum.Mouse, key(systemTerminal, InfoCmp.Capability.key_mouse));
         return keyMap;
     }
 
@@ -168,7 +170,11 @@ public class App {
         }
         display = new Display(systemTerminal, true);
         size.copy(systemTerminal.getSize());
-        appKeyMap = createEmptyKeyMap("`");
+        appKeyMap = createEmptyKeyMap();
+        appKeyMap.bind("history-back-page", translate("^[[1;5A"), alt(translate("^[[A"))); // ctrl-up
+        appKeyMap.bind("history-forward-page", translate("^[[1;5B"), alt(translate("^[[B"))); // ctrl-down
+        appKeyMap.bind("history-back", key(systemTerminal, Capability.key_sr)); // shift-up
+        appKeyMap.bind("history-forward", key(systemTerminal, Capability.key_sf)); // shift-down
     }
 
     private LineDisciplineTerminal console;
@@ -332,7 +338,8 @@ public class App {
                 } else {
                     b = null;
                 }
-                if (b == Binding.SelfInsert) {
+                //System.out.println("f:" + first + " b:" + b);
+                if (b == BindingEnum.SelfInsert) {
                     masterInputOutput.write(keyboardreader.getLastBinding().getBytes());
                     first = false;
                 } else {
@@ -342,7 +349,7 @@ public class App {
                         masterInputOutput.flush();
                         first = true;
                     }
-                    if (b == Binding.Mouse) {
+                    if (b == BindingEnum.Mouse) {
                         MouseEvent event = systemTerminal.readMouseEvent();
                         // System.err.println(event.toString());
                     } else if (b instanceof String || b instanceof String[]) {
@@ -355,8 +362,8 @@ public class App {
                             } else {
                                 execute(pout, perr, Arrays.asList((String[]) b));
                             }
-                        } catch (Exception e) {
-                            // TODO: log
+                        } catch (Exception ex) {
+                            console.writer().println("ex:" + ex.getMessage());
                         }
                     }
                 }
@@ -370,6 +377,8 @@ public class App {
             setDirty();
         }
     }
+
+    private boolean prevIsScrolling = false;
 
     private void redrawLoop() {
         while (running.get()) {
@@ -401,6 +410,13 @@ public class App {
                 }
                 lines.add(sb.toAttributedString());
             }
+            if (screenTerminal.isScrolling && !prevIsScrolling) {
+                systemTerminal.puts(Capability.cursor_invisible);
+                prevIsScrolling = true;
+            } else if (!screenTerminal.isScrolling && prevIsScrolling) {
+                systemTerminal.puts(Capability.cursor_visible);
+                prevIsScrolling = false;
+            }
             display.resize(size.getRows(), size.getColumns());
             display.update(lines, size.cursorPos(cursor[1], cursor[0]));
         }
@@ -417,11 +433,26 @@ public class App {
     }
 
     private void execute(PrintStream pout, PrintStream perr, String cmd) {
-        pout.println("about to execute: " + cmd);
+        switch (cmd) {
+            case "history-forward":
+                screenTerminal.historyForward();
+                break;
+            case "history-back":
+                screenTerminal.historyBack();
+                break;
+            case "history-forward-page":
+                screenTerminal.historyForwardPage();
+                break;
+            case "history-back-page":
+                screenTerminal.historyBackPage();
+                break;
+            default:
+                throw new UnsupportedOperationException("cmd not implemented: '" + cmd + "'");
+        }
     }
 
     private void execute(PrintStream pout, PrintStream perr, List<String> b) {
-        pout.println("not sure what to expect: " + String.join("", b));
+        System.out.println("not sure what to expect: " + String.join("", b));
     }
 
     private void terminate() {
@@ -438,6 +469,9 @@ public class App {
         reader = LineReaderBuilder.builder().terminal(console).history(history).build();
         reader.setOpt(LineReader.Option.AUTO_FRESH_LINE);
         reader.setVariable(LineReader.HISTORY_FILE, ".cmd-history");
+        KeyMap<Binding> keyMap = reader.getKeyMaps().get(LineReader.MAIN);
+        keyMap.bind(new Reference(LineReader.UP_LINE_OR_HISTORY), KeyMap.key(console, Capability.key_up));
+        keyMap.bind(new Reference(LineReader.DOWN_LINE_OR_HISTORY), KeyMap.key(console, Capability.key_down));
         while (true) {
             try {
                 openPort();
@@ -459,7 +493,8 @@ public class App {
                 terminate();
                 break;
             } catch (Throwable ex) {
-                console.writer().println("ex:"  + ex);
+                console.writer().println(ex);
+                console.writer().flush();
             }
         }
     }
