@@ -473,6 +473,8 @@ public class App {
         KeyMap<Binding> keyMap = reader.getKeyMaps().get(LineReader.MAIN);
         keyMap.bind(new Reference(LineReader.UP_LINE_OR_HISTORY), KeyMap.key(console, Capability.key_up));
         keyMap.bind(new Reference(LineReader.DOWN_LINE_OR_HISTORY), KeyMap.key(console, Capability.key_down));
+        keyMap.bind(new Reference(LineReader.BEGINNING_OF_LINE), KeyMap.esc() + "OH");
+        keyMap.bind(new Reference(LineReader.END_OF_LINE), KeyMap.esc() + "OF");
         while (true) {
             try {
                 openPort();
