@@ -52,6 +52,7 @@ import org.jline.terminal.TerminalBuilder;
 import org.jline.terminal.impl.LineDisciplineTerminal;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
+import org.jline.utils.AttributedStyle;
 import org.jline.utils.Display;
 import org.jline.utils.InfoCmp;
 import org.jline.utils.InfoCmp.Capability;
@@ -72,6 +73,8 @@ public class App {
     private Terminal systemTerminal;
     private History history;
     private LineReader reader;
+
+    private final int statusLineSize = 2;
 
     private static final String MARKER = "~~~END~~~";
 
@@ -280,7 +283,7 @@ public class App {
         systemTerminal.flush();
         executor = Executors.newSingleThreadScheduledExecutor();
         try {
-            screenTerminal = new ScreenTerminal(size.getColumns(), size.getRows() - 1) {
+            screenTerminal = new ScreenTerminal(size.getColumns(), size.getRows() - statusLineSize) {
                 @Override
                 protected void setDirty() {
                     super.setDirty();
@@ -303,7 +306,7 @@ public class App {
                     // closer.accept(Tmux.VirtualConsole.this);
                 }
             };
-            this.console.setSize(new Size(size.getColumns(), size.getRows() - 1));
+            this.console.setSize(new Size(size.getColumns(), size.getRows() - statusLineSize));
             console.setAttributes(systemTerminal.getAttributes());
             new Thread(this::serialrun, "Interactive").start();
             new Thread(this::inputLoop, "Mux input loop").start();
@@ -392,15 +395,15 @@ public class App {
                 e.printStackTrace();
             }
             handleResize();
-            long[] screen = new long[size.getRows() * size.getColumns()];
+            long[] screen = new long[(size.getRows() - statusLineSize) * size.getColumns()];
             // Fill
             Arrays.fill(screen, 0x00000020L);
             int[] cursor = new int[2];
 
             // redraw();
-            screenTerminal.dump(screen, 0, 0, size.getRows() - 1, size.getColumns(), cursor);
+            screenTerminal.dump(screen, 0, 0, size.getRows() - statusLineSize, size.getColumns(), cursor);
             List<AttributedString> lines = new ArrayList<>();
-            for (int y = 0; y < size.getRows(); y++) {
+            for (int y = 0; y < size.getRows() - statusLineSize; y++) {
                 AttributedStringBuilder sb = new AttributedStringBuilder(size.getColumns());
                 // TODO: bring back colors/bold etc.
                 for (int x = 0; x < size.getColumns(); x++) {
@@ -410,6 +413,8 @@ public class App {
                 }
                 lines.add(sb.toAttributedString());
             }
+            // lines.add(new AttributedString(""));
+            lines.add(calculateStatusLine());
             if (screenTerminal.isScrolling && !prevIsScrolling) {
                 systemTerminal.puts(Capability.cursor_invisible);
                 prevIsScrolling = true;
@@ -422,13 +427,47 @@ public class App {
         }
     }
 
+
+    private AttributedString calculateStatusLine() {
+        AttributedStringBuilder sb = new AttributedStringBuilder();
+        sb.style(AttributedStyle.INVERSE);
+        /*
+        if (serialPort != null && serialPort.isOpened()) {
+            sb.append("CTS ");
+            sb.append(serialPort.isCTSX() ? "on  " : "off ");
+            sb.append("DSR ");
+            sb.append(serialPort.isDSRX() ? "on  " : "off ");
+            sb.append("RTS ");
+            sb.append(serialPort.isRts() ? "on  " : "off ");
+            sb.append("DTR ");
+            sb.append(serialPort.isDtr() ? "on" : "off");
+        } else {
+            sb.append("closed");
+        }
+        */
+        if (serialPort == null ||  !serialPort.isOpened() || state == state.DISCONNECTED || state == state.SYNC) {
+            sb.append("xxxx");
+        } else {
+            sb.append("CTS ");
+            sb.append(serialPort.isCTSX() ? "on  " : "off ");
+            sb.append("DSR ");
+            sb.append(serialPort.isDSRX() ? "on  " : "off ");
+            sb.append("RTS ");
+            sb.append(serialPort.isRts() ? "on  " : "off ");
+            sb.append("DTR ");
+            sb.append(serialPort.isDtr() ? "on" : "off");
+        }
+        sb.style(AttributedStyle.DEFAULT);
+        return sb.toAttributedString();
+    }
+
     private void handleResize() {
         // Re-compute the layout
         if (resized.compareAndSet(true, false)) {
             screenTerminal.historyScrollTerminate();
             size.copy(systemTerminal.getSize());
-            screenTerminal.setSize(size.getColumns(), size.getRows() - 1);
-            console.setSize(new Size(size.getColumns(), size.getRows() - 1));
+            screenTerminal.setSize(size.getColumns(), size.getRows() - statusLineSize);
+            console.setSize(new Size(size.getColumns(), size.getRows() - statusLineSize));
             // may have to clear display here
         }
     }
@@ -673,6 +712,10 @@ public class App {
             ce.start();
         } else if (command.equals("--globals")) {
             serialPort.writeStringX("for k,v in pairs(_G) do print(k,v) end\n");
+        } else if (command.startsWith("--dtr")) {
+            processDtrCommand(command);
+        } else if (command.startsWith("--rts")) {
+            processRtsCommand(command);
         } else {
             throw new InvalidCommandException("not a valid command");
         }
@@ -754,6 +797,34 @@ public class App {
                 + "print('~~~'..'END'..'~~~')\n";
         state = State.WAIT_FOR_MARKER;
         serialPort.writeStringX(cmd);
+    }
+
+    private void processDtrCommand(String command) throws InvalidCommandException {
+        String args[];
+        args = command.split("\\s+");
+        if (args.length != 2 || !(args[1].equals("on") || args[1].equals("off")) ) {
+            throw new InvalidCommandException("expect either on or off as parameter");
+        }
+        serialPort.setDTRX(args[1].equals("on"));
+        try {
+            promptQueue.put("> ");
+        } catch (InterruptedException ex) {
+            console.writer().println("interrupter in put");
+        }
+    }
+
+    private void processRtsCommand(String command) throws InvalidCommandException {
+        String args[];
+        args = command.split("\\s+");
+        if (args.length != 2 || !(args[1].equals("on") || args[1].equals("off")) ) {
+            throw new InvalidCommandException("expect either on or off as parameter");
+        }
+        serialPort.setRTSX(args[1].equals("on"));
+        try {
+            promptQueue.put("> ");
+        } catch (InterruptedException ex) {
+            console.writer().println("interrupter in put");
+        }
     }
 
     public void openPort() {

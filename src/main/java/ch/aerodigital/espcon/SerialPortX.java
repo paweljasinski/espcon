@@ -21,6 +21,10 @@ public class SerialPortX extends SerialPort {
 
     private final Stack<SerialPortEventListenerX> eventListeners;
 
+    private boolean rts;
+
+    private boolean dtr;
+
     public SerialPortX(String portName) {
         super(portName);
         eventListeners = new Stack<>();
@@ -144,6 +148,47 @@ public class SerialPortX extends SerialPort {
         }
     }
 
+    public void setDTRX(boolean enabled) {
+        try {
+            boolean ret = super.setDTR(enabled);
+            if (!ret) {
+                throw new SerialPortXException("setDTR failed");
+            }
+            dtr = enabled;
+        } catch (SerialPortException ex) {
+            throw new SerialPortXException(ex.getMessage(), ex);
+        }
+    }
+
+    public void setRTSX(boolean enabled) {
+        try {
+            boolean ret = super.setRTS(enabled);
+            if (!ret) {
+                throw new SerialPortXException("setRTS failed");
+            }
+            rts = enabled;
+        } catch (SerialPortException ex) {
+            throw new SerialPortXException(ex.getMessage(), ex);
+        }
+    }
+
+    public boolean isCTSX() {
+        try {
+            return super.isCTS();
+        } catch (SerialPortException ex) {
+            throw new SerialPortXException(ex.getMessage(), ex);
+        }
+    }
+
+    public boolean isDSRX() {
+        try {
+            return super.isDSR();
+        } catch (SerialPortException ex) {
+            throw new SerialPortXException(ex.getMessage(), ex);
+        }
+    }
+
+
     public void pushEventListener(SerialPortEventListenerX listener) {
         eventListeners.push(listener);
     }
@@ -154,6 +199,20 @@ public class SerialPortX extends SerialPort {
 
     public void installCommonEventListener(SerialPortEventListenerX listener) {
         commonEventListener = listener;
+    }
+
+    /**
+     * @return the rts
+     */
+    public boolean isRts() {
+        return rts;
+    }
+
+    /**
+     * @return the dtr
+     */
+    public boolean isDtr() {
+        return dtr;
     }
 
 }
